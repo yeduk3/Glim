@@ -54,12 +54,7 @@ Toggle with `⌘E` — *View* renders KaTeX math, tables, and highlighted code; 
 
 ### Download (prebuilt)
 
-Grab the latest **[qmd.app from Releases](https://github.com/yeduk3/qmd/releases/latest)** (Universal — Apple Silicon + Intel), unzip, and move it to `/Applications`.
-
-The build is *ad-hoc signed, not notarized*, so on first launch Gatekeeper blocks it. Bypass once with either:
-
-- Right-click **qmd.app** → **Open** → **Open**, or
-- `xattr -dr com.apple.quarantine /Applications/qmd.app`
+Grab the latest **[qmd.app from Releases](https://github.com/yeduk3/qmd/releases/latest)** (Universal — Apple Silicon + Intel), unzip, and move it to `/Applications`. The app is signed with a Developer ID and **notarized by Apple**, so it opens with no Gatekeeper warnings.
 
 Launch it once to register the Quick Look extension. To make it your default Markdown app: right-click a `.md` → **Get Info** → **Open with** → **qmd** → **Change All…**
 
@@ -71,7 +66,7 @@ cd qmd
 ./install.sh
 ```
 
-`install.sh` builds a Release version, copies **qmd.app** to `/Applications`, registers it with Launch Services, sets it as the default handler for Markdown, and enables the Quick Look extension. Building from source also avoids the Gatekeeper prompt.
+`install.sh` builds a Release version, copies **qmd.app** to `/Applications`, registers it with Launch Services, sets it as the default handler for Markdown, and enables the Quick Look extension.
 
 To build without installing:
 

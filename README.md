@@ -8,6 +8,7 @@
 
 Two modes — clean **View** and raw **Edit**. Folder sidebar, offline **LaTeX**, and **Quick Look** previews from Finder.
 
+[![release](https://img.shields.io/github/v/release/yeduk3/qmd)](https://github.com/yeduk3/qmd/releases/latest)
 ![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
 ![swift](https://img.shields.io/badge/Swift-5-orange)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -51,13 +52,26 @@ Toggle with `⌘E` — *View* renders KaTeX math, tables, and highlighted code; 
 
 ## Install
 
+### Download (prebuilt)
+
+Grab the latest **[qmd.app from Releases](https://github.com/yeduk3/qmd/releases/latest)** (Universal — Apple Silicon + Intel), unzip, and move it to `/Applications`.
+
+The build is *ad-hoc signed, not notarized*, so on first launch Gatekeeper blocks it. Bypass once with either:
+
+- Right-click **qmd.app** → **Open** → **Open**, or
+- `xattr -dr com.apple.quarantine /Applications/qmd.app`
+
+Launch it once to register the Quick Look extension. To make it your default Markdown app: right-click a `.md` → **Get Info** → **Open with** → **qmd** → **Change All…**
+
+### Build from source
+
 ```bash
 git clone https://github.com/yeduk3/qmd.git
 cd qmd
 ./install.sh
 ```
 
-`install.sh` builds a Release version, copies **qmd.app** to `/Applications`, registers it with Launch Services, sets it as the default handler for Markdown, and enables the Quick Look extension.
+`install.sh` builds a Release version, copies **qmd.app** to `/Applications`, registers it with Launch Services, sets it as the default handler for Markdown, and enables the Quick Look extension. Building from source also avoids the Gatekeeper prompt.
 
 To build without installing:
 

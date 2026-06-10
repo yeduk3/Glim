@@ -100,11 +100,12 @@ private struct WindowAccessor: NSViewRepresentable {
             window.tabbingMode = .preferred
             window.tabbingIdentifier = tabID
 
-            // only windows rooted at the SAME folder are tab siblings
+            // only windows rooted at the SAME folder are tab siblings.
+            // (don't filter on isVisible — it's false during rapid window creation)
             let siblings = Self.registry.allObjects.filter {
-                $0 !== window && $0.isVisible && $0.tabbingIdentifier == tabID
+                $0 !== window && $0.tabbingIdentifier == tabID
             }
-            Self.log.notice("attach root=\(self.rootKey, privacy: .public) sameRootSiblings=\(siblings.count)")
+            Self.log.debug("attach root=\(self.rootKey, privacy: .public) sameRootSiblings=\(siblings.count)")
             Self.registry.add(window)
 
             if let host = siblings.first {
@@ -112,9 +113,14 @@ private struct WindowAccessor: NSViewRepresentable {
                 // Note: a standalone window is already in its own tab-group-of-one,
                 // so guard on "different group", not "no group".
                 if window.tabGroup !== host.tabGroup {
+                    // match the host's frame BEFORE tabbing so adding a tab never
+                    // resizes the group (otherwise the new window's default size wins)
+                    let hostFrame = host.frame
+                    window.setFrame(hostFrame, display: false)
                     host.addTabbedWindow(window, ordered: .above)
+                    window.setFrame(hostFrame, display: false)
                     window.makeKeyAndOrderFront(nil)
-                    Self.log.notice("addTabbedWindow -> hostTabCount=\(host.tabbedWindows?.count ?? -1)")
+                    Self.log.debug("tabbed into host; group count=\(host.tabbedWindows?.count ?? -1)")
                 }
             } else {
                 // first window -> restore saved size

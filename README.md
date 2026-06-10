@@ -75,6 +75,8 @@ To build without installing:
 - **Editor window** — SwiftUI. *View* mode renders Markdown in a `WKWebView` (markdown-it → HTML, KaTeX for math, highlight.js for code). *Edit* mode is an `NSTextView` with soft-wrap and a small line-based linter.
 - **Quick Look extension** — Finder's QL sandbox won't let a `WKWebView` spawn its WebContent process, so the extension renders Markdown to **fully static HTML in-process with JavaScriptCore** (KaTeX is pre-expanded to HTML + base64-inlined fonts) and returns it as a data-based `QLPreviewReply`. No JavaScript runs at display time.
 
+  > The Quick Look extension was built by studying **[sbarex/QLMarkdown](https://github.com/sbarex/QLMarkdown)** — its working implementation is what revealed the two non-obvious requirements (`QLIsDataBasedPreview` in the extension `Info.plist`, and that a sandboxed `WKWebView` can't be used directly). Many thanks to that project. 🙏
+
 ## Project layout
 
 ```
@@ -96,9 +98,10 @@ rm -rf /Applications/qmd.app
 
 (Reset the default app for `.md` via Finder → Get Info if desired.)
 
-## Credits
+## Credits & Acknowledgements
 
-Rendering powered by [markdown-it](https://github.com/markdown-it/markdown-it), [KaTeX](https://katex.org), [highlight.js](https://highlightjs.org), and [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath). Quick Look approach inspired by [QLMarkdown](https://github.com/sbarex/QLMarkdown).
+- **[sbarex/QLMarkdown](https://github.com/sbarex/QLMarkdown)** — qmd's Quick Look extension was made by **referencing this project**. Studying its source is what made the data-based preview work (see [How it works](#how-it-works)). Huge thanks. 🙏
+- Rendering powered by [markdown-it](https://github.com/markdown-it/markdown-it), [KaTeX](https://katex.org), [highlight.js](https://highlightjs.org), and [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath).
 
 ## License
 

@@ -103,6 +103,10 @@ private struct RawTextView: NSViewRepresentable {
         context.coordinator.applyFind(find)
     }
 
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.reportNow() // capture final scroll position before the view goes away
+    }
+
     private func applyUnderlines(_ tv: NSTextView) {
         guard let lm = tv.layoutManager else { return }
         let full = NSRange(location: 0, length: (tv.string as NSString).length)
@@ -162,6 +166,12 @@ private struct RawTextView: NSViewRepresentable {
                 self.reportScheduled = false
                 if !self.programmatic { self.parent.sync.report(line: self.topLine(), from: .edit) }
             }
+        }
+
+        /// Report the current top line immediately (used at teardown, before ⌘E swaps views).
+        func reportNow() {
+            guard !programmatic else { return }
+            parent.sync.report(line: topLine(), from: .edit)
         }
 
         /// 0-based source line shown at the top of the visible area.

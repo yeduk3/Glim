@@ -32,17 +32,19 @@ final class FindController: ObservableObject {
 /// the incoming view scrolls to `line` only when the *other* view set it.
 final class ScrollSync: ObservableObject {
     private(set) var line = 0
-    private(set) var source: EditorMode?
+    /// True once either view has reported a position; until then there's nothing to restore.
+    private(set) var primed = false
 
     func report(line: Int, from: EditorMode) {
         self.line = max(0, line)
-        self.source = from
+        self.primed = true
     }
 
-    /// Line the `incoming` mode should scroll to, or nil if it already owns the position.
+    /// Line the `incoming` view should restore to (nil until a position exists). The
+    /// incoming view always restores the shared line — including when it set it last,
+    /// which is a no-op — so a plain ⌘E toggle never snaps back to the top.
     func target(for incoming: EditorMode) -> Int? {
-        guard let source, source != incoming else { return nil }
-        return line
+        primed ? line : nil
     }
 }
 

@@ -11,6 +11,9 @@ struct qmdApp: App {
         // snapping the group back to the default size. Window sizing is managed
         // manually in ContentView's WindowAccessor (cached size, default fallback).
         .commands {
+            CommandGroup(replacing: .newItem) {
+                NewFileCommands()
+            }
             CommandGroup(after: .textEditing) {
                 FindCommands()
             }
@@ -44,6 +47,21 @@ private struct TabCommands: View {
         guard let group = NSApp.keyWindow?.tabGroup,
               index < group.windows.count else { return }
         group.selectedWindow = group.windows[index]
+    }
+}
+
+/// File-menu New, replacing the default. When a document window is focused it creates
+/// a new markdown file in that file's folder and opens it as a tab; otherwise it falls
+/// back to a fresh untitled document so ⌘N always does something.
+private struct NewFileCommands: View {
+    @FocusedValue(\.newFileAction) private var newFile: (() -> Void)?
+
+    var body: some View {
+        Button("New") {
+            if let newFile { newFile() }
+            else { NSDocumentController.shared.newDocument(nil) }
+        }
+        .keyboardShortcut("n", modifiers: .command)
     }
 }
 
@@ -88,6 +106,7 @@ enum EditorMode: String { case view, edit }
 
 private struct EditorModeKey: FocusedValueKey { typealias Value = Binding<EditorMode> }
 private struct SidebarVisibleKey: FocusedValueKey { typealias Value = Binding<Bool> }
+private struct NewFileActionKey: FocusedValueKey { typealias Value = () -> Void }
 
 extension FocusedValues {
     var editorMode: Binding<EditorMode>? {
@@ -97,5 +116,9 @@ extension FocusedValues {
     var sidebarVisible: Binding<Bool>? {
         get { self[SidebarVisibleKey.self] }
         set { self[SidebarVisibleKey.self] = newValue }
+    }
+    var newFileAction: (() -> Void)? {
+        get { self[NewFileActionKey.self] }
+        set { self[NewFileActionKey.self] = newValue }
     }
 }

@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @StateObject private var find = FindController()
     @StateObject private var sync = ScrollSync()
+    @StateObject private var tree = FileTreeModel()
+    @Environment(\.openDocument) private var openDocument
 
     private var sidebarVisible: Binding<Bool> {
         Binding(
@@ -22,7 +24,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(rootURL: fileURL?.deletingLastPathComponent(), currentFile: fileURL)
+            SidebarView(rootURL: fileURL?.deletingLastPathComponent(), currentFile: fileURL, tree: tree)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 420)
         } detail: {
             detail
@@ -31,7 +33,16 @@ struct ContentView: View {
         .focusedSceneValue(\.editorMode, $mode)
         .focusedSceneValue(\.sidebarVisible, sidebarVisible)
         .focusedSceneValue(\.findController, find)
+        .focusedSceneValue(\.newFileAction, createNewFile)
         .background(WindowAccessor(rootKey: fileURL?.deletingLastPathComponent().standardizedFileURL.path ?? "none"))
+    }
+
+    /// Creates a new markdown file in the open file's folder and opens it as a tab.
+    private func createNewFile() {
+        guard let dir = fileURL?.deletingLastPathComponent(),
+              let url = FileEntry.makeNewFile(in: dir) else { return }
+        tree.reload()
+        Task { try? await openDocument(at: url) }
     }
 
     @ViewBuilder private var detail: some View {

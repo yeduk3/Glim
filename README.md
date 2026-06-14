@@ -77,6 +77,17 @@ To build without installing:
 
 > Builds intentionally target DerivedData **outside** the repo to avoid Spotlight/indexer churn. `build/`, `DerivedData/`, and the generated `qmd.xcodeproj` are git-ignored — `project.yml` is the source of truth.
 
+### Cut a release
+
+One command does the whole flow — bump version, commit, push, build + sign + notarize, install to `/Applications`, publish the GitHub release, and clean up build artifacts:
+
+```bash
+./ship.sh 1.1.5                                   # prints a plan, asks to confirm
+./ship.sh 1.1.5 -m "release: …" -n notes.md -y    # custom message + notes, no prompt
+```
+
+It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads the Team ID from your Developer ID certificate, and refuses to clobber an existing tag/release. Requires the same signing prerequisites as `release.sh` (a *Developer ID Application* cert and a `notarytool` keychain profile, default `qmd-notary`). The build/sign/notarize step is `release.sh`; `ship.sh` wraps the git + install + publish + clean around it.
+
 ## Usage
 
 | Action | How |
@@ -111,6 +122,7 @@ App/                     SwiftUI app
 QuickLook/               data-based Quick Look preview extension (JavaScriptCore)
 project.yml              XcodeGen project spec
 build.sh / install.sh    build & install scripts
+release.sh / ship.sh     sign+notarize · one-command release (bump→publish→clean)
 ```
 
 ## Uninstall

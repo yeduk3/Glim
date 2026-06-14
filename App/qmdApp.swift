@@ -86,6 +86,7 @@ private struct FindCommands: View {
 private struct ModeCommands: View {
     @FocusedBinding(\.editorMode) private var mode: EditorMode?
     @FocusedBinding(\.sidebarVisible) private var sidebarVisible: Bool?
+    @FocusedValue(\.focusSidebarAction) private var focusSidebar: (() -> Void)?
 
     var body: some View {
         Button(mode == .edit ? "Switch to View" : "Switch to Edit") {
@@ -99,6 +100,10 @@ private struct ModeCommands: View {
         }
         .keyboardShortcut("\\", modifiers: .command)
         .disabled(sidebarVisible == nil)
+
+        Button("Focus Sidebar") { focusSidebar?() }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(focusSidebar == nil)
     }
 }
 
@@ -107,6 +112,7 @@ enum EditorMode: String { case view, edit }
 private struct EditorModeKey: FocusedValueKey { typealias Value = Binding<EditorMode> }
 private struct SidebarVisibleKey: FocusedValueKey { typealias Value = Binding<Bool> }
 private struct NewFileActionKey: FocusedValueKey { typealias Value = () -> Void }
+private struct FocusSidebarActionKey: FocusedValueKey { typealias Value = () -> Void }
 
 extension FocusedValues {
     var editorMode: Binding<EditorMode>? {
@@ -120,5 +126,9 @@ extension FocusedValues {
     var newFileAction: (() -> Void)? {
         get { self[NewFileActionKey.self] }
         set { self[NewFileActionKey.self] = newValue }
+    }
+    var focusSidebarAction: (() -> Void)? {
+        get { self[FocusSidebarActionKey.self] }
+        set { self[FocusSidebarActionKey.self] = newValue }
     }
 }

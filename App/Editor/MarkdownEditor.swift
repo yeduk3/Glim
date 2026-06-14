@@ -85,8 +85,16 @@ private struct RawTextView: NSViewRepresentable {
         clip.postsBoundsChangedNotifications = true
         context.coordinator.observeScroll(clip)
 
-        if let line = initialLine {
-            DispatchQueue.main.async { context.coordinator.scroll(toLine: line) }
+        // On entering edit mode: take keyboard focus and land the caret at the line
+        // that was at the top of the rendered view (the scroll-sync target), so focus
+        // sits at the right height instead of jumping to the document top.
+        DispatchQueue.main.async {
+            let coord = context.coordinator
+            coord.focusEditor()
+            if let line = initialLine {
+                coord.placeCaret(atLine: line)
+                coord.scroll(toLine: line)
+            }
         }
         return scroll
     }
@@ -186,11 +194,21 @@ private struct RawTextView: NSViewRepresentable {
             return head.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
         }
 
-        /// Scroll so 0-based source `line` sits at the top.
-        func scroll(toLine line: Int) {
-            guard let tv = textView, let lm = tv.layoutManager, let tc = tv.textContainer,
-                  let clip = tv.enclosingScrollView?.contentView else { return }
-            let s = tv.string as NSString
+        /// Makes the text view first responder so edit mode is immediately typable.
+        func focusEditor() {
+            guard let tv = textView else { return }
+            tv.window?.makeFirstResponder(tv)
+        }
+
+        /// Place the (empty) caret at the start of 0-based source `line`.
+        func placeCaret(atLine line: Int) {
+            guard let tv = textView else { return }
+            let char = charIndex(forLine: line, in: tv.string as NSString)
+            tv.setSelectedRange(NSRange(location: char, length: 0))
+        }
+
+        /// Character offset of the start of 0-based source `line`.
+        private func charIndex(forLine line: Int, in s: NSString) -> Int {
             var idx = 0, cur = 0
             while cur < line && idx < s.length {
                 let lr = s.lineRange(for: NSRange(location: idx, length: 0))
@@ -198,7 +216,15 @@ private struct RawTextView: NSViewRepresentable {
                 if nxt <= idx { break }
                 idx = nxt; cur += 1
             }
-            let char = min(idx, s.length)
+            return min(idx, s.length)
+        }
+
+        /// Scroll so 0-based source `line` sits at the top.
+        func scroll(toLine line: Int) {
+            guard let tv = textView, let lm = tv.layoutManager, let tc = tv.textContainer,
+                  let clip = tv.enclosingScrollView?.contentView else { return }
+            let s = tv.string as NSString
+            let char = charIndex(forLine: line, in: s)
             lm.ensureLayout(for: tc)
             let gr = lm.glyphRange(forCharacterRange: NSRange(location: char, length: 0), actualCharacterRange: nil)
             let rect = lm.boundingRect(forGlyphRange: gr, in: tc)

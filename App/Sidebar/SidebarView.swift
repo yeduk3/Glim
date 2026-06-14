@@ -1,26 +1,60 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 
-/// Bumped whenever a file is created or trashed so the tree re-reads from disk.
-/// Both the root list and every expanded `FileRow` observe it.
+/// Bumped whenever the watched folder changes on disk so the tree re-reads.
+/// Both the root list and every expanded `FileRow` observe it. The change can come
+/// from this tab, another tab, or an external app — the FSEvents watcher fires
+/// regardless, which is what keeps sidebars across tabs synced to the filesystem.
 final class FileTreeModel: ObservableObject {
     @Published var version = 0
+    private lazy var watcher = DirectoryWatcher { [weak self] in self?.reload() }
+
     func reload() { version &+= 1 }
+
+    /// Points the filesystem watcher at `url` (nil stops watching). The watcher
+    /// no-ops when already on that path, so this is safe to call on every update.
+    func watch(_ url: URL?) {
+        if let url { watcher.start(url: url) } else { watcher.stop() }
+    }
+}
+
+/// Drives keyboard control of the sidebar: which row is selected, which (if any)
+/// is being renamed inline, and a pulse to pull keyboard focus into the list
+/// (⌘⇧E). Mirrors the `FindController` pattern so the menu command can reach it.
+final class SidebarController: ObservableObject {
+    @Published var selection: URL?
+    @Published var renamingURL: URL?
+    @Published var renameText = ""
+    /// Bumped to move keyboard focus into the list (⌘⇧E, or after a rename commits).
+    @Published var focusPulse = 0
+    /// Set by the key monitor (space / ⌘↓) to ask SwiftUI to open a file; SwiftUI
+    /// owns `openDocument`, the AppKit monitor doesn't, so it routes through here.
+    @Published var openRequest: URL?
+    /// The List's backing outline view, captured by the keyboard bridge so the key
+    /// monitor can tell whether *this* tab's sidebar is the first responder.
+    weak var outlineView: NSView?
+
+    func focus() { focusPulse &+= 1 }
+    func beginRename(_ url: URL) { selection = url; renamingURL = url }
+    func endRename() { renamingURL = nil; focus() }
 }
 
 struct SidebarView: View {
     let rootURL: URL?
     let currentFile: URL?
     @ObservedObject var tree: FileTreeModel
+    @ObservedObject var sidebar: SidebarController
     @Environment(\.openDocument) private var openDocument
 
     var body: some View {
         Group {
             if let rootURL {
-                List {
+                List(selection: $sidebar.selection) {
                     Section {
                         ForEach(FileEntry.children(of: rootURL)) { entry in
-                            FileRow(entry: entry, currentFile: currentFile, tree: tree)
+                            FileRow(entry: entry, currentFile: currentFile,
+                                    tree: tree, sidebar: sidebar)
                         }
                     } header: {
                         HStack {
@@ -35,12 +69,30 @@ struct SidebarView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                // AppKit bridge: `.focused()` on a List doesn't make its NSOutlineView
+                // first responder on macOS, so ⌘⇧E wouldn't enable arrow keys. This
+                // grabs first responder on `focusPulse` (native ↑↓←→) and runs a key
+                // monitor for the custom space / ⌘↓ / Return actions the outline view
+                // would otherwise swallow.
+                .background(SidebarKeyboardBridge(controller: sidebar, pulse: sidebar.focusPulse))
+                .onChange(of: sidebar.focusPulse) { _, _ in
+                    if sidebar.selection == nil {
+                        sidebar.selection = currentFile ?? FileEntry.children(of: rootURL).first?.url
+                    }
+                }
+                .onChange(of: sidebar.openRequest) { _, url in
+                    guard let url else { return }
+                    sidebar.openRequest = nil
+                    open(url)
+                }
             } else {
                 ContentUnavailableView("No Folder", systemImage: "folder",
                     description: Text("Open a Markdown file to browse its folder."))
             }
         }
         .frame(minWidth: 180)
+        .onAppear { tree.watch(rootURL) }
+        .onChange(of: rootURL) { _, new in tree.watch(new) }
     }
 
     private func newFile(in dir: URL) {
@@ -48,25 +100,47 @@ struct SidebarView: View {
         tree.reload()
         Task { try? await openDocument(at: url) }
     }
+
+    /// Opens a selected row by URL (keyboard: space / ⌘↓). Folders are left to the
+    /// list's native ←/→ expand; only files open.
+    private func open(_ url: URL) {
+        var isDir: ObjCBool = false
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        guard !isDir.boolValue else { return }
+        if FileEntry.isMarkdown(url) {
+            Task { try? await openDocument(at: url) }
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
 }
 
 private struct FileRow: View {
     let entry: FileEntry
     let currentFile: URL?
     @ObservedObject var tree: FileTreeModel
+    @ObservedObject var sidebar: SidebarController
 
     @State private var expanded = false
     @State private var children: [FileEntry] = []
+    @FocusState private var renameFocused: Bool
     @Environment(\.openDocument) private var openDocument
+
+    private var isRenaming: Bool { sidebar.renamingURL == entry.url }
 
     var body: some View {
         if entry.isDirectory {
             DisclosureGroup(isExpanded: $expanded) {
-                ForEach(children) { FileRow(entry: $0, currentFile: currentFile, tree: tree) }
+                ForEach(children) { FileRow(entry: $0, currentFile: currentFile, tree: tree, sidebar: sidebar) }
             } label: {
-                Label(entry.name, systemImage: "folder")
-                    .lineLimit(1)
+                if isRenaming {
+                    renameField
+                } else {
+                    Label(entry.name, systemImage: "folder")
+                        .lineLimit(1)
+                }
             }
+            .tag(entry.url)
             .onChange(of: expanded) { _, now in
                 if now { children = FileEntry.children(of: entry.url) }
             }
@@ -75,25 +149,43 @@ private struct FileRow: View {
             }
             .contextMenu { rowMenu(newFileTarget: entry.url) }
         } else {
-            Button { open() } label: {
-                Label {
-                    Text(entry.name).lineLimit(1)
-                } icon: {
-                    Image(systemName: entry.isMarkdown ? "doc.text" : "doc")
-                        .foregroundStyle(entry.isMarkdown ? Color.accentColor : Color.secondary)
+            Group {
+                if isRenaming {
+                    renameField
+                } else {
+                    Label {
+                        Text(entry.name).lineLimit(1)
+                    } icon: {
+                        Image(systemName: entry.isMarkdown ? "doc.text" : "doc")
+                            .foregroundStyle(entry.isMarkdown ? Color.accentColor : Color.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    // Preserve single-click-to-open while the list still owns selection
+                    // for keyboard navigation.
+                    .simultaneousGesture(TapGesture().onEnded { open() })
                 }
             }
-            .buttonStyle(.plain)
+            .tag(entry.url)
             .fontWeight(isCurrent ? .semibold : .regular)
-            .listRowBackground(isCurrent ? Color.accentColor.opacity(0.15) : nil)
             .contextMenu { rowMenu(newFileTarget: entry.url.deletingLastPathComponent()) }
         }
+    }
+
+    /// Inline editor shown in place of the row label while renaming.
+    private var renameField: some View {
+        TextField("", text: $sidebar.renameText)
+            .textFieldStyle(.plain)
+            .focused($renameFocused)
+            .onAppear { sidebar.renameText = entry.name; renameFocused = true }
+            .onSubmit { commitRename() }
+            .onExitCommand { sidebar.endRename() }
     }
 
     /// `newFileTarget` is the folder a "New File" here lands in: the directory itself
     /// for a folder row, the containing folder for a file row.
     @ViewBuilder private func rowMenu(newFileTarget: URL) -> some View {
         Button("New File") { newFile(in: newFileTarget) }
+        Button("Rename") { sidebar.beginRename(entry.url) }
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([entry.url])
         }
@@ -109,6 +201,14 @@ private struct FileRow: View {
         return entry.url.standardizedFileURL == currentFile.standardizedFileURL
     }
 
+    private func commitRename() {
+        if let new = FileEntry.rename(entry.url, to: sidebar.renameText) {
+            if sidebar.selection == entry.url { sidebar.selection = new }
+            tree.reload()
+        }
+        sidebar.endRename()
+    }
+
     private func newFile(in dir: URL) {
         guard let url = FileEntry.makeNewFile(in: dir) else { return }
         if entry.isDirectory { expanded = true }
@@ -117,6 +217,7 @@ private struct FileRow: View {
     }
 
     private func open() {
+        sidebar.selection = entry.url
         if entry.isMarkdown {
             Task { try? await openDocument(at: entry.url) }
         } else {
@@ -132,9 +233,13 @@ struct FileEntry: Identifiable {
 
     var id: URL { url }
 
-    var isMarkdown: Bool {
-        ["md", "markdown", "mdown", "mkd", "mdwn", "mkdn"].contains(url.pathExtension.lowercased())
+    static let markdownExtensions: Set<String> = ["md", "markdown", "mdown", "mkd", "mdwn", "mkdn"]
+
+    static func isMarkdown(_ url: URL) -> Bool {
+        markdownExtensions.contains(url.pathExtension.lowercased())
     }
+
+    var isMarkdown: Bool { FileEntry.isMarkdown(url) }
 
     static func children(of dir: URL) -> [FileEntry] {
         let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey]
@@ -171,8 +276,135 @@ struct FileEntry: Identifiable {
         }
     }
 
+    /// Renames `url` to `newName` within the same folder. Returns the new URL, or nil
+    /// if the name is empty, contains a path separator, or collides with an existing item.
+    ///
+    /// Uses a *coordinated* move (NSFileCoordinator + `didMoveTo:`) rather than a bare
+    /// `FileManager.moveItem`, so that if the file is open in a tab its NSDocument (a
+    /// file presenter) follows to the new URL instead of dangling on the old path.
+    static func rename(_ url: URL, to newName: String) -> URL? {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("/") else { return nil }
+        let dest = url.deletingLastPathComponent().appendingPathComponent(trimmed)
+        if dest.standardizedFileURL == url.standardizedFileURL { return url }
+        guard !FileManager.default.fileExists(atPath: dest.path) else { return nil }
+
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordError: NSError?
+        var moved = false
+        coordinator.coordinate(writingItemAt: url, options: .forMoving,
+                               writingItemAt: dest, options: .forReplacing,
+                               error: &coordError) { src, dst in
+            coordinator.item(at: src, willMoveTo: dst)
+            do {
+                try FileManager.default.moveItem(at: src, to: dst)
+                coordinator.item(at: src, didMoveTo: dst)   // notifies the open document
+                moved = true
+            } catch {
+                moved = false
+            }
+        }
+        return moved ? dest : nil
+    }
+
     /// Moves `url` to the Trash (reversible, so no confirmation needed).
     static func trash(_ url: URL) {
         try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+}
+
+/// Bridges the SwiftUI sidebar to AppKit for keyboard control, working around two
+/// macOS limitations of `List`:
+///   1. `.focused()` won't make the backing `NSOutlineView` first responder, so
+///      ⌘⇧E couldn't enable arrow-key navigation — `grabFocus()` does it directly.
+///   2. A focused outline view swallows Space/Return, so SwiftUI `.onKeyPress`
+///      never sees them — a local key monitor intercepts Space / ⌘↓ / Return and
+///      routes them to the controller (open / begin-rename) before the view reacts.
+/// The monitor is scoped to this tab via `controller.outlineView`, so other tabs'
+/// monitors ignore the event.
+private struct SidebarKeyboardBridge: NSViewRepresentable {
+    let controller: SidebarController
+    let pulse: Int
+
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
+
+    func makeNSView(context: Context) -> NSView {
+        context.coordinator.lastPulse = pulse
+        return NSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard pulse != context.coordinator.lastPulse else { return }
+        context.coordinator.lastPulse = pulse
+        context.coordinator.grabFocus(near: nsView)
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.removeMonitor()
+    }
+
+    final class Coordinator {
+        private let controller: SidebarController
+        private var monitor: Any?
+        var lastPulse = -1
+
+        init(controller: SidebarController) {
+            self.controller = controller
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.handle(event) ?? event
+            }
+        }
+
+        func removeMonitor() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        /// Makes this tab's sidebar outline view first responder (deferred so a
+        /// just-revealed sidebar has laid out). Captures the view so the monitor
+        /// can scope to it. Retries once if the view isn't built yet.
+        func grabFocus(near anchor: NSView, retry: Bool = true) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = anchor.window else { return }
+                if let outline = Self.findOutlineView(in: window.contentView) {
+                    self.controller.outlineView = outline
+                    window.makeFirstResponder(outline)
+                } else if retry {
+                    self.grabFocus(near: anchor, retry: false)
+                }
+            }
+        }
+
+        /// Intercepts the custom keys only while this sidebar's outline view is the
+        /// first responder and no inline rename is active. Returns nil to swallow.
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let outline = controller.outlineView,
+                  event.window?.firstResponder === outline,
+                  controller.renamingURL == nil,
+                  let sel = controller.selection else { return event }
+
+            switch event.keyCode {
+            case 36, 76:                     // Return / Enter -> rename
+                controller.beginRename(sel)
+                return nil
+            case 49:                         // Space -> open
+                controller.openRequest = sel
+                return nil
+            case 125 where event.modifierFlags.contains(.command):  // ⌘↓ -> open
+                controller.openRequest = sel
+                return nil
+            default:
+                return event
+            }
+        }
+
+        private static func findOutlineView(in view: NSView?) -> NSView? {
+            guard let view else { return nil }
+            if view is NSTableView { return view }   // NSOutlineView is an NSTableView
+            for sub in view.subviews {
+                if let found = findOutlineView(in: sub) { return found }
+            }
+            return nil
+        }
     }
 }

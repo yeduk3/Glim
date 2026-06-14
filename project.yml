@@ -6,8 +6,8 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    MARKETING_VERSION: "1.1.1"
-    CURRENT_PROJECT_VERSION: "3"
+    MARKETING_VERSION: "1.1.2"
+    CURRENT_PROJECT_VERSION: "4"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
@@ -35,6 +35,13 @@ targets:
         INFOPLIST_FILE: App/Info.plist
         COMBINE_HIDPI_IMAGES: "YES"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Debug uses a separate bundle id so local/Xcode builds in DerivedData never
+        # share com.gyu.qmd with the installed /Applications release. Same-id duplicates
+        # make pkd reject one Quick Look plug-in (silently killing preview) and let
+        # Launch Services flip the .md handler to a transient build copy.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.gyu.qmd.debug
     dependencies:
       - target: QuickLookExtension
         embed: true
@@ -56,3 +63,7 @@ targets:
         PRODUCT_MODULE_NAME: QuickLookExtension
         INFOPLIST_FILE: QuickLook/Info.plist
         CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLook.entitlements
+      configs:
+        # Must stay prefixed by the host app id (com.gyu.qmd.debug) for Debug.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.gyu.qmd.debug.QuickLookExtension

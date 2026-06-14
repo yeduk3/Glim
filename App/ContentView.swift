@@ -9,6 +9,7 @@ struct ContentView: View {
     @StateObject private var find = FindController()
     @StateObject private var sync = ScrollSync()
     @StateObject private var tree = FileTreeModel()
+    @StateObject private var sidebar = SidebarController()
     @Environment(\.openDocument) private var openDocument
 
     private var sidebarVisible: Binding<Bool> {
@@ -24,7 +25,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(rootURL: fileURL?.deletingLastPathComponent(), currentFile: fileURL, tree: tree)
+            SidebarView(rootURL: fileURL?.deletingLastPathComponent(), currentFile: fileURL, tree: tree, sidebar: sidebar)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 420)
         } detail: {
             detail
@@ -34,6 +35,7 @@ struct ContentView: View {
         .focusedSceneValue(\.sidebarVisible, sidebarVisible)
         .focusedSceneValue(\.findController, find)
         .focusedSceneValue(\.newFileAction, createNewFile)
+        .focusedSceneValue(\.focusSidebarAction, focusSidebar)
         .background(WindowAccessor(rootKey: fileURL?.deletingLastPathComponent().standardizedFileURL.path ?? "none"))
     }
 
@@ -43,6 +45,14 @@ struct ContentView: View {
               let url = FileEntry.makeNewFile(in: dir) else { return }
         tree.reload()
         Task { try? await openDocument(at: url) }
+    }
+
+    /// Reveals the sidebar (if collapsed) and pulls keyboard focus into it (⌘⇧E).
+    private func focusSidebar() {
+        if columnVisibility == .detailOnly {
+            withAnimation(.easeInOut(duration: 0.25)) { columnVisibility = .all }
+        }
+        sidebar.focus()
     }
 
     @ViewBuilder private var detail: some View {

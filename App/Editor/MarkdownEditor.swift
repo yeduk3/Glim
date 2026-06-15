@@ -7,12 +7,13 @@ struct MarkdownEditor: View {
     var sync: ScrollSync
     var initialLine: Int?
     var focusPulse: Int = 0
+    var fontScale: Double = 1
     @State private var issues: [LintIssue] = []
 
     var body: some View {
         VStack(spacing: 0) {
             RawTextView(text: $text, issues: issues, find: find, sync: sync,
-                        initialLine: initialLine, focusPulse: focusPulse)
+                        initialLine: initialLine, focusPulse: focusPulse, fontScale: fontScale)
             if !issues.isEmpty {
                 Divider()
                 LintBar(issues: issues)
@@ -53,6 +54,10 @@ private struct RawTextView: NSViewRepresentable {
     var sync: ScrollSync
     var initialLine: Int?
     var focusPulse: Int = 0
+    var fontScale: Double = 1
+
+    /// Monospace point size at the current zoom (13pt is the 1.0 baseline).
+    private var fontSize: CGFloat { 13 * CGFloat(fontScale) }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -62,7 +67,8 @@ private struct RawTextView: NSViewRepresentable {
         tv.delegate = context.coordinator
         tv.string = text
 
-        tv.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        context.coordinator.lastFontSize = fontSize
         tv.isRichText = false
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
@@ -112,6 +118,10 @@ private struct RawTextView: NSViewRepresentable {
             tv.setSelectedRange(NSRange(location: min(sel.location, (text as NSString).length), length: 0))
             context.coordinator.matchesStale = true
         }
+        if context.coordinator.lastFontSize != fontSize {
+            context.coordinator.lastFontSize = fontSize
+            tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
         applyUnderlines(tv)
         context.coordinator.applyFind(find)
         if focusPulse != context.coordinator.lastFocusPulse {
@@ -144,6 +154,7 @@ private struct RawTextView: NSViewRepresentable {
         var parent: RawTextView
         weak var textView: NSTextView?
         var lastFocusPulse = 0
+        var lastFontSize: CGFloat = 13
         private var boundsObserver: NSObjectProtocol?
         private var programmatic = false
         private var reportScheduled = false

@@ -9,6 +9,8 @@ struct MarkdownWebView: NSViewRepresentable {
     var initialLine: Int?
     /// Bumped by `DetailFocusController` to pull keyboard focus into the web view.
     var focusPulse: Int = 0
+    /// App-wide font zoom (1.0 == default). Applied as the rendered body font-size.
+    var fontScale: Double = 1
 
     func makeCoordinator() -> Coordinator { Coordinator(sync: sync) }
 
@@ -22,6 +24,7 @@ struct MarkdownWebView: NSViewRepresentable {
         context.coordinator.webView = webView
         context.coordinator.pendingLine = initialLine
         context.coordinator.lastFocusPulse = focusPulse
+        context.coordinator.fontScale = fontScale
 
         if let index = WebResources.indexURL(), let dir = WebResources.directory() {
             webView.loadFileURL(index, allowingReadAccessTo: dir)
@@ -31,6 +34,7 @@ struct MarkdownWebView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.render(markdown)
+        context.coordinator.applyFontScale(fontScale)
         context.coordinator.applyFind(find)
         if focusPulse != context.coordinator.lastFocusPulse {
             context.coordinator.lastFocusPulse = focusPulse
@@ -47,6 +51,8 @@ struct MarkdownWebView: NSViewRepresentable {
         private var lastRendered: String?
         var pendingLine: Int?
         var lastFocusPulse = 0
+        var fontScale: Double = 1
+        private var appliedFontScale: Double = .nan
 
         // find de-dup
         private var lastVisible = false
@@ -63,6 +69,15 @@ struct MarkdownWebView: NSViewRepresentable {
             lastRendered = markdown
             webView?.evaluateJavaScript("window.renderMarkdown(\(WebResources.jsLiteral(markdown)));",
                                         completionHandler: nil)
+        }
+
+        /// Push the current zoom into the page (no-op until ready, and de-duped so a
+        /// re-render or find echo doesn't re-evaluate JS for an unchanged scale).
+        func applyFontScale(_ scale: Double) {
+            fontScale = scale
+            guard ready, scale != appliedFontScale else { return }
+            appliedFontScale = scale
+            webView?.evaluateJavaScript("window.qmdSetFontScale(\(scale));", completionHandler: nil)
         }
 
         // MARK: find
@@ -121,6 +136,8 @@ struct MarkdownWebView: NSViewRepresentable {
                 pending = nil
                 lastRendered = nil
                 render(md)
+                appliedFontScale = .nan        // force a fresh apply now that the page exists
+                applyFontScale(fontScale)
                 if let line = pendingLine {
                     pendingLine = nil
                     webView?.evaluateJavaScript(

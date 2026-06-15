@@ -62,6 +62,14 @@ window.renderMarkdown = function (src) {
   if (max > 0) window.scrollTo(0, prevRatio * max);
 };
 
+// ---- font zoom -------------------------------------------------------------
+// Scale every text size off the body font-size. Headings, code, KaTeX, etc. are
+// all sized in `em`, so scaling the body cascades to the whole document.
+window.qmdSetFontScale = function (scale) {
+  var s = (typeof scale === 'number' && scale > 0) ? scale : 1;
+  document.body.style.fontSize = (16 * s) + 'px';
+};
+
 // ---- scroll sync API -------------------------------------------------------
 // 0-based source line of the block at the top of the viewport (interpolated).
 window.qmdGetTopLine = function () {

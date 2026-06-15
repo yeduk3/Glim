@@ -19,6 +19,8 @@ struct qmdApp: App {
             }
             CommandGroup(after: .toolbar) {
                 ModeCommands()
+                Divider()
+                FontSizeCommands()
             }
             CommandGroup(after: .windowArrangement) {
                 TabCommands()
@@ -104,6 +106,22 @@ private struct ModeCommands: View {
         Button("Focus Sidebar") { focusSidebar?() }
             .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(focusSidebar == nil)
+    }
+}
+
+/// View-menu font zoom, applied app-wide to both the rendered view and raw editor.
+/// ⌘+ bigger, ⌘- smaller, ⌘0 reset. (⌘+ is produced by ⌘⇧=; the menu shows "⌘+".)
+private struct FontSizeCommands: View {
+    @ObservedObject private var font = FontScale.shared
+
+    var body: some View {
+        Button("Increase Font Size") { font.zoomIn() }
+            .keyboardShortcut("+", modifiers: .command)
+        Button("Decrease Font Size") { font.zoomOut() }
+            .keyboardShortcut("-", modifiers: .command)
+        Button("Actual Size") { font.reset() }
+            .keyboardShortcut("0", modifiers: .command)
+            .disabled(font.scale == 1.0)
     }
 }
 

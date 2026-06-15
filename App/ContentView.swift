@@ -11,6 +11,7 @@ struct ContentView: View {
     @StateObject private var tree = FileTreeModel()
     @StateObject private var sidebar = SidebarController()
     @StateObject private var detailFocus = DetailFocusController()
+    @ObservedObject private var fontScale = FontScale.shared
     @Environment(\.openDocument) private var openDocument
 
     private var sidebarVisible: Binding<Bool> {
@@ -102,16 +103,18 @@ struct ContentView: View {
         switch mode {
         case .view:
             MarkdownWebView(markdown: document.text, find: find, sync: sync,
-                            initialLine: sync.target(for: .view), focusPulse: detailFocus.pulse)
+                            initialLine: sync.target(for: .view), focusPulse: detailFocus.pulse,
+                            fontScale: fontScale.scale)
                 .ignoresSafeArea(edges: .bottom)
         case .edit:
             MarkdownEditor(text: $document.text, find: find, sync: sync,
-                           initialLine: sync.target(for: .edit), focusPulse: detailFocus.pulse)
+                           initialLine: sync.target(for: .edit), focusPulse: detailFocus.pulse,
+                           fontScale: fontScale.scale)
         }
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
+        ToolbarItem(placement: .primaryAction) {
             Picker("Mode", selection: $mode) {
                 Image(systemName: "eye").tag(EditorMode.view)
                 Image(systemName: "pencil").tag(EditorMode.edit)
@@ -176,21 +179,29 @@ private struct WindowAccessor: NSViewRepresentable {
             window.tabbingMode = .preferred
             window.tabbingIdentifier = tabID
 
-            // only windows rooted at the SAME folder are tab siblings.
-            // (don't filter on isVisible — it's false during rapid window creation)
-            let siblings = Self.registry.allObjects.filter {
-                $0 !== window && $0.tabbingIdentifier == tabID
-            }
+            // An existing qmd window for the SAME root is the tab host. Look past our
+            // weak registry to every app window, so a momentary registry miss during
+            // rapid opening can't spawn a stray un-tabbed window — that stray window was
+            // what knocked a single Magnet-snapped window out of its arrangement.
+            let host = existingHost(excluding: window)
             Self.registry.add(window)
 
-            if let host = siblings.first, window.tabGroup !== host.tabGroup {
-                // a qmd window already exists -> tab into it, matching its frame so
-                // adding a tab never resizes the group.
+            if let host {
+                // Tab into the existing group and adopt its exact frame, so adding a tab
+                // never moves or resizes the window the user (or Magnet) positioned.
                 let hostFrame = host.frame
-                window.setFrame(hostFrame, display: false)
-                host.addTabbedWindow(window, ordered: .above)
+                if window.tabGroup !== host.tabGroup {
+                    host.addTabbedWindow(window, ordered: .above)
+                }
                 window.setFrame(hostFrame, display: false)
                 window.makeKeyAndOrderFront(nil)
+                // AppKit/SwiftUI sometimes runs a post-tab layout pass that nudges the
+                // group off its Magnet snap; re-assert the frame once it settles.
+                DispatchQueue.main.async { [weak host, weak window] in
+                    guard let host, let window else { return }
+                    let f = host.frame
+                    if window.frame != f { window.setFrame(f, display: false) }
+                }
             } else {
                 // first window of this root -> cached size (or default fallback).
                 var f = window.frame
@@ -204,6 +215,13 @@ private struct WindowAccessor: NSViewRepresentable {
                 guard let s = window?.frame.size else { return }
                 UserDefaults.standard.set(["w": Double(s.width), "h": Double(s.height)], forKey: Self.sizeKey)
             }
+        }
+
+        /// An existing live qmd window sharing this tab id — registry first, then a
+        /// sweep of all app windows in case the registry hasn't caught up yet.
+        private func existingHost(excluding window: NSWindow) -> NSWindow? {
+            let match: (NSWindow) -> Bool = { $0 !== window && $0.tabbingIdentifier == self.tabID }
+            return Self.registry.allObjects.first(where: match) ?? NSApp.windows.first(where: match)
         }
 
         func detach() {

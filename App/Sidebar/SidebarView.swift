@@ -375,7 +375,12 @@ private struct SidebarKeyboardBridge: NSViewRepresentable {
         init(controller: SidebarController) {
             self.controller = controller
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                self?.handle(event) ?? event
+                // `handle` returns nil to SWALLOW (e.g. ⌘↓ opens the file and must NOT
+                // also let the outline view move the selection down). Don't fold that nil
+                // into `?? event` — that would re-dispatch the swallowed key. Only fall
+                // back to passing the event through when `self` is gone.
+                guard let self else { return event }
+                return self.handle(event)
             }
         }
 

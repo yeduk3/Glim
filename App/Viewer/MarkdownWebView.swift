@@ -11,13 +11,16 @@ struct MarkdownWebView: NSViewRepresentable {
     var focusPulse: Int = 0
     /// App-wide font zoom (1.0 == default). Applied as the rendered body font-size.
     var fontScale: Double = 1
+    /// Receives the rendered selection's character count for the bottom readout.
+    var selection: SelectionController
 
-    func makeCoordinator() -> Coordinator { Coordinator(sync: sync) }
+    func makeCoordinator() -> Coordinator { Coordinator(sync: sync, selection: selection) }
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.userContentController.add(context.coordinator, name: "ready")
         config.userContentController.add(context.coordinator, name: "scroll")
+        config.userContentController.add(context.coordinator, name: "selection")
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground") // let CSS paint bg, avoid white flash
@@ -45,6 +48,7 @@ struct MarkdownWebView: NSViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         weak var webView: WKWebView?
         private let sync: ScrollSync
+        private let selection: SelectionController
         private var ready = false
         private var pending: String?
         private var lastMarkdown: String?
@@ -60,7 +64,10 @@ struct MarkdownWebView: NSViewRepresentable {
         private var lastCase = false
         private var lastNav = 0
 
-        init(sync: ScrollSync) { self.sync = sync }
+        init(sync: ScrollSync, selection: SelectionController) {
+            self.sync = sync
+            self.selection = selection
+        }
 
         func render(_ markdown: String) {
             lastMarkdown = markdown
@@ -147,6 +154,9 @@ struct MarkdownWebView: NSViewRepresentable {
             case "scroll":
                 let line = (message.body as? Int) ?? Int((message.body as? Double) ?? 0)
                 sync.report(line: line, from: .view)
+            case "selection":
+                let n = (message.body as? Int) ?? Int((message.body as? Double) ?? 0)
+                selection.report(max(0, n))
             default:
                 break
             }

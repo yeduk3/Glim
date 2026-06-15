@@ -55,6 +55,15 @@ final class DetailFocusController: ObservableObject {
     func focus() { pulse &+= 1 }
 }
 
+/// Character count of the current text selection, fed by whichever detail view is
+/// active (rendered web view or raw editor). 0 means nothing selected -> the count
+/// readout hides. ContentView owns one per tab.
+final class SelectionController: ObservableObject {
+    @Published var count = 0
+    func report(_ n: Int) { if n != count { count = n } }
+    func clear() { if count != 0 { count = 0 } }
+}
+
 /// Which side takes keyboard focus after a sidebar-initiated open.
 enum SidebarFocusTarget { case sidebar, detail }
 

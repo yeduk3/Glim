@@ -8,12 +8,14 @@ struct MarkdownEditor: View {
     var initialLine: Int?
     var focusPulse: Int = 0
     var fontScale: Double = 1
+    var selection: SelectionController
     @State private var issues: [LintIssue] = []
 
     var body: some View {
         VStack(spacing: 0) {
             RawTextView(text: $text, issues: issues, find: find, sync: sync,
-                        initialLine: initialLine, focusPulse: focusPulse, fontScale: fontScale)
+                        initialLine: initialLine, focusPulse: focusPulse, fontScale: fontScale,
+                        selection: selection)
             if !issues.isEmpty {
                 Divider()
                 LintBar(issues: issues)
@@ -55,6 +57,7 @@ private struct RawTextView: NSViewRepresentable {
     var initialLine: Int?
     var focusPulse: Int = 0
     var fontScale: Double = 1
+    var selection: SelectionController
 
     /// Monospace point size at the current zoom (13pt is the 1.0 baseline).
     private var fontSize: CGFloat { 13 * CGFloat(fontScale) }
@@ -176,6 +179,15 @@ private struct RawTextView: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
             matchesStale = true
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            let r = tv.selectedRange()
+            // Count grapheme clusters (user-visible characters), not UTF-16 units, so
+            // emoji/combining marks read as one. Empty selection -> 0 -> bar hides.
+            let n = r.length == 0 ? 0 : (tv.string as NSString).substring(with: r).count
+            parent.selection.report(n)
         }
 
         // MARK: scroll sync

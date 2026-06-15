@@ -11,6 +11,7 @@ struct ContentView: View {
     @StateObject private var tree = FileTreeModel()
     @StateObject private var sidebar = SidebarController()
     @StateObject private var detailFocus = DetailFocusController()
+    @StateObject private var selection = SelectionController()
     @ObservedObject private var fontScale = FontScale.shared
     @Environment(\.openDocument) private var openDocument
 
@@ -44,6 +45,7 @@ struct ContentView: View {
         // (The raw editor self-focuses on entry.) Only fires on an actual ⌘E toggle,
         // not on a fresh tab/Space-preview where mode starts at .view.
         .onChange(of: mode) { _, m in
+            selection.clear()   // stale count from the outgoing view shouldn't linger
             if m == .view { detailFocus.focus() }
         }
         // A sidebar-initiated open can land in this tab (new or already-open); claim
@@ -96,6 +98,10 @@ struct ContentView: View {
                 Divider()
             }
             modeView
+            if selection.count > 0 {
+                Divider()
+                SelectionCountBar(count: selection.count)
+            }
         }
     }
 
@@ -104,12 +110,12 @@ struct ContentView: View {
         case .view:
             MarkdownWebView(markdown: document.text, find: find, sync: sync,
                             initialLine: sync.target(for: .view), focusPulse: detailFocus.pulse,
-                            fontScale: fontScale.scale)
+                            fontScale: fontScale.scale, selection: selection)
                 .ignoresSafeArea(edges: .bottom)
         case .edit:
             MarkdownEditor(text: $document.text, find: find, sync: sync,
                            initialLine: sync.target(for: .edit), focusPulse: detailFocus.pulse,
-                           fontScale: fontScale.scale)
+                           fontScale: fontScale.scale, selection: selection)
         }
     }
 
@@ -122,6 +128,23 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .help("Toggle View / Edit  (⌘E)")
         }
+    }
+}
+
+/// Small trailing readout of how many characters the current selection spans.
+/// Shown only while something is selected (count > 0).
+private struct SelectionCountBar: View {
+    let count: Int
+    var body: some View {
+        HStack {
+            Spacer()
+            Text("\(count) character\(count == 1 ? "" : "s") selected")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
+        .background(.bar)
     }
 }
 

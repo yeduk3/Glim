@@ -122,6 +122,22 @@ window.addEventListener('scroll', function () {
   }, 80);
 }, { passive: true });
 
+// ---- selection character count ---------------------------------------------
+// Report the selected text's length (code points, ~user-visible chars) to native,
+// debounced. 0 when the selection is empty/collapsed so the readout hides.
+let qmdSelTimer = null;
+function qmdReportSelection() {
+  const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.selection;
+  if (!h) return;
+  const s = window.getSelection();
+  const str = (s && !s.isCollapsed) ? s.toString() : '';
+  h.postMessage(str ? Array.from(str).length : 0);
+}
+document.addEventListener('selectionchange', function () {
+  if (qmdSelTimer) return;
+  qmdSelTimer = setTimeout(function () { qmdSelTimer = null; qmdReportSelection(); }, 120);
+});
+
 // ---- in-page find ----------------------------------------------------------
 window.qmdCountMatches = function (q, caseSensitive) {
   if (!q) return 0;

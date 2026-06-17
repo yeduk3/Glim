@@ -12,6 +12,7 @@ struct ContentView: View {
     @StateObject private var sidebar = SidebarController()
     @StateObject private var detailFocus = DetailFocusController()
     @StateObject private var selection = SelectionController()
+    @StateObject private var quickOpen = QuickOpenController()
     @ObservedObject private var fontScale = FontScale.shared
     @ObservedObject private var fullWidth = FullWidthMode.shared
     @Environment(\.openDocument) private var openDocument
@@ -36,11 +37,16 @@ struct ContentView: View {
             detail
                 .toolbar { toolbarContent }
         }
+        .sheet(isPresented: Binding(get: { quickOpen.isVisible },
+                                    set: { if !$0 { quickOpen.hide() } })) {
+            QuickOpenPalette(controller: quickOpen, onOpen: openFromQuickOpen)
+        }
         .focusedSceneValue(\.editorMode, $mode)
         .focusedSceneValue(\.sidebarVisible, sidebarVisible)
         .focusedSceneValue(\.findController, find)
         .focusedSceneValue(\.newFileAction, createNewFile)
         .focusedSceneValue(\.focusSidebarAction, focusSidebar)
+        .focusedSceneValue(\.quickOpenAction, { quickOpen.show(root: fileURL?.deletingLastPathComponent()) })
         .background(WindowAccessor(rootKey: fileURL?.deletingLastPathComponent().standardizedFileURL.path ?? "none"))
         // Toggling to the rendered view focuses it so arrow keys scroll immediately.
         // (The raw editor self-focuses on entry.) Only fires on an actual ⌘E toggle,
@@ -76,6 +82,18 @@ struct ContentView: View {
         guard let dir = fileURL?.deletingLastPathComponent(),
               let url = FileEntry.makeNewFile(in: dir) else { return }
         tree.reload()
+        sidebar.captureScroll(root: dir)
+        Task { try? await openDocument(at: url) }
+    }
+
+    /// Opens a file chosen from the ⌘O palette (markdown opens as a tab; anything else is
+    /// handed to its default app), carrying the sidebar scroll position into the new tab.
+    private func openFromQuickOpen(_ url: URL) {
+        quickOpen.hide()
+        guard FileEntry.isMarkdown(url) else { NSWorkspace.shared.open(url); return }
+        if fileURL?.standardizedFileURL == url.standardizedFileURL { detailFocus.focus(); return }
+        OpenFocusRouter.shared.pending = PendingFocus(url: url, target: .detail)
+        sidebar.captureScroll(root: fileURL?.deletingLastPathComponent())
         Task { try? await openDocument(at: url) }
     }
 

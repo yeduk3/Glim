@@ -13,6 +13,7 @@ struct qmdApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 NewFileCommands()
+                OpenFileCommand()
             }
             CommandGroup(after: .textEditing) {
                 FindCommands()
@@ -66,6 +67,18 @@ private struct NewFileCommands: View {
             else { NSDocumentController.shared.newDocument(nil) }
         }
         .keyboardShortcut("n", modifiers: .command)
+    }
+}
+
+/// File-menu Open… (⌘O), raising the focused window's quick-open palette to fuzzy-search
+/// and open any markdown file under the browsed folder. Disabled when no document is focused.
+private struct OpenFileCommand: View {
+    @FocusedValue(\.quickOpenAction) private var openAction: (() -> Void)?
+
+    var body: some View {
+        Button("Open…") { openAction?() }
+            .keyboardShortcut("o", modifiers: .command)
+            .disabled(openAction == nil)
     }
 }
 

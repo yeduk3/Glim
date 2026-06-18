@@ -10,13 +10,14 @@ struct MarkdownEditor: View {
     var fontScale: Double = 1
     var fullWidth: Bool = false
     var selection: SelectionController
+    var cursor: EditCursorStore
     @State private var issues: [LintIssue] = []
 
     var body: some View {
         VStack(spacing: 0) {
             RawTextView(text: $text, issues: issues, find: find, sync: sync,
                         initialLine: initialLine, focusPulse: focusPulse, fontScale: fontScale,
-                        fullWidth: fullWidth, selection: selection)
+                        fullWidth: fullWidth, selection: selection, cursor: cursor)
             if !issues.isEmpty {
                 Divider()
                 LintBar(issues: issues)
@@ -60,6 +61,7 @@ private struct RawTextView: NSViewRepresentable {
     var fontScale: Double = 1
     var fullWidth: Bool = false
     var selection: SelectionController
+    var cursor: EditCursorStore
 
     /// Base text measure (points) used when full-width is off, before zoom scaling.
     static let maxMeasure: CGFloat = 720
@@ -120,7 +122,11 @@ private struct RawTextView: NSViewRepresentable {
             let coord = context.coordinator
             coord.applyWidth(scroll)
             coord.focusEditor()
-            if let line = initialLine {
+            // Restore the caret saved earlier this session (mode switch / tab revisit); only
+            // fall back to the scroll-sync line on the first entry, when none is saved yet.
+            if let loc = cursor.location {
+                coord.placeCaret(atOffset: loc)
+            } else if let line = initialLine {
                 coord.placeCaret(atLine: line)
                 coord.scroll(toLine: line)
             }
@@ -211,6 +217,7 @@ private struct RawTextView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             let r = tv.selectedRange()
+            parent.cursor.location = r.location   // remembered for view<->edit / tab revisits
             // Count grapheme clusters (user-visible characters), not UTF-16 units, so
             // emoji/combining marks read as one. Empty selection -> 0 -> bar hides.
             let n = r.length == 0 ? 0 : (tv.string as NSString).substring(with: r).count
@@ -302,6 +309,14 @@ private struct RawTextView: NSViewRepresentable {
         func focusEditor() {
             guard let tv = textView else { return }
             tv.window?.makeFirstResponder(tv)
+        }
+
+        /// Place the (empty) caret at UTF-16 `offset` (clamped) and scroll it into view.
+        func placeCaret(atOffset offset: Int) {
+            guard let tv = textView else { return }
+            let loc = max(0, min(offset, (tv.string as NSString).length))
+            tv.setSelectedRange(NSRange(location: loc, length: 0))
+            tv.scrollRangeToVisible(NSRange(location: loc, length: 0))
         }
 
         /// Place the (empty) caret at the start of 0-based source `line`.

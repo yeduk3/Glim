@@ -4,8 +4,19 @@ struct ContentView: View {
     @Binding var document: MarkdownDocument
     let fileURL: URL?
 
+    init(document: Binding<MarkdownDocument>, fileURL: URL?) {
+        _document = document
+        self.fileURL = fileURL
+        // The folder the sidebar browses for this tab. Normally the file's parent, but a
+        // file opened from a subfolder inherits the source tab's root (parked in
+        // OpenRootRouter), so it tabs into the same window and keeps the same tree.
+        let inherited = fileURL.flatMap { OpenRootRouter.shared.roots[$0.standardizedFileURL] }
+        _browsingRoot = State(initialValue: inherited ?? fileURL?.deletingLastPathComponent())
+    }
+
     @State private var mode: EditorMode = .view
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var browsingRoot: URL?
+    @ObservedObject private var sidebarVis = SidebarVisibility.shared
     @StateObject private var find = FindController()
     @StateObject private var sync = ScrollSync()
     @StateObject private var tree = FileTreeModel()
@@ -13,24 +24,26 @@ struct ContentView: View {
     @StateObject private var detailFocus = DetailFocusController()
     @StateObject private var selection = SelectionController()
     @StateObject private var quickOpen = QuickOpenController()
+    @StateObject private var fileSync = FileSync()
+    @StateObject private var editCursor = EditCursorStore()
     @ObservedObject private var fontScale = FontScale.shared
     @ObservedObject private var fullWidth = FullWidthMode.shared
     @Environment(\.openDocument) private var openDocument
 
     private var sidebarVisible: Binding<Bool> {
         Binding(
-            get: { columnVisibility != .detailOnly },
+            get: { sidebarVis.columnVisibility != .detailOnly },
             set: { show in
                 withAnimation(.easeInOut(duration: 0.25)) {
-                    columnVisibility = show ? .all : .detailOnly
+                    sidebarVis.columnVisibility = show ? .all : .detailOnly
                 }
             }
         )
     }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(rootURL: fileURL?.deletingLastPathComponent(), currentFile: fileURL,
+        NavigationSplitView(columnVisibility: $sidebarVis.columnVisibility) {
+            SidebarView(rootURL: browsingRoot, currentFile: fileURL,
                         tree: tree, sidebar: sidebar, detailFocus: detailFocus)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 420)
         } detail: {
@@ -46,8 +59,8 @@ struct ContentView: View {
         .focusedSceneValue(\.findController, find)
         .focusedSceneValue(\.newFileAction, createNewFile)
         .focusedSceneValue(\.focusSidebarAction, focusSidebar)
-        .focusedSceneValue(\.quickOpenAction, { quickOpen.show(root: fileURL?.deletingLastPathComponent()) })
-        .background(WindowAccessor(rootKey: fileURL?.deletingLastPathComponent().standardizedFileURL.path ?? "none"))
+        .focusedSceneValue(\.quickOpenAction, { quickOpen.show(root: browsingRoot) })
+        .background(WindowAccessor(rootKey: browsingRoot?.standardizedFileURL.path ?? "none"))
         // Toggling to the rendered view focuses it so arrow keys scroll immediately.
         // (The raw editor self-focuses on entry.) Only fires on an actual ⌘E toggle,
         // not on a fresh tab/Space-preview where mode starts at .view.
@@ -57,7 +70,13 @@ struct ContentView: View {
         }
         // A sidebar-initiated open can land in this tab (new or already-open); claim
         // the parked focus intent once we're showing that file.
-        .onAppear { claimPendingFocus() }
+        .onAppear {
+            claimPendingFocus()
+            if let f = fileURL?.standardizedFileURL { OpenRootRouter.shared.roots[f] = nil }
+            fileSync.currentText = { document.text }
+            fileSync.applyReload = { document.text = $0 }
+            fileSync.start(url: fileURL)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             claimPendingFocus()
         }
@@ -81,8 +100,9 @@ struct ContentView: View {
     private func createNewFile() {
         guard let dir = fileURL?.deletingLastPathComponent(),
               let url = FileEntry.makeNewFile(in: dir) else { return }
+        if let root = browsingRoot { OpenRootRouter.shared.roots[url.standardizedFileURL] = root }
         tree.reload()
-        sidebar.captureScroll(root: dir)
+        sidebar.captureScroll(root: browsingRoot)
         Task { try? await openDocument(at: url) }
     }
 
@@ -91,9 +111,17 @@ struct ContentView: View {
     private func openFromQuickOpen(_ url: URL) {
         quickOpen.hide()
         guard FileEntry.isMarkdown(url) else { NSWorkspace.shared.open(url); return }
+        openInApp(url)
+    }
+
+    /// Opens a markdown file in qmd (as a tab in this folder's group), reusing the current
+    /// tab if it's already that file. Used by the ⌘O palette and in-document links.
+    private func openInApp(_ url: URL) {
         if fileURL?.standardizedFileURL == url.standardizedFileURL { detailFocus.focus(); return }
         OpenFocusRouter.shared.pending = PendingFocus(url: url, target: .detail)
-        sidebar.captureScroll(root: fileURL?.deletingLastPathComponent())
+        // Hand the destination tab this tab's root so a subfolder file tabs in here.
+        if let root = browsingRoot { OpenRootRouter.shared.roots[url.standardizedFileURL] = root }
+        sidebar.captureScroll(root: browsingRoot)
         Task { try? await openDocument(at: url) }
     }
 
@@ -104,14 +132,18 @@ struct ContentView: View {
             detailFocus.focus()
             return
         }
-        if columnVisibility == .detailOnly {
-            withAnimation(.easeInOut(duration: 0.25)) { columnVisibility = .all }
+        if sidebarVis.columnVisibility == .detailOnly {
+            withAnimation(.easeInOut(duration: 0.25)) { sidebarVis.columnVisibility = .all }
         }
         sidebar.focus()
     }
 
     @ViewBuilder private var detail: some View {
         VStack(spacing: 0) {
+            if fileSync.conflict != nil {
+                ExternalChangeBar(onReload: { fileSync.reload() }, onKeep: { fileSync.keepMine() })
+                Divider()
+            }
             if find.isVisible {
                 FindBar(find: find)
                 Divider()
@@ -129,12 +161,14 @@ struct ContentView: View {
         case .view:
             MarkdownWebView(markdown: document.text, find: find, sync: sync,
                             initialLine: sync.target(for: .view), focusPulse: detailFocus.pulse,
-                            fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth, selection: selection)
+                            fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth, selection: selection,
+                            docDirectory: fileURL?.deletingLastPathComponent(), onOpenFile: openInApp)
                 .ignoresSafeArea(edges: .bottom)
         case .edit:
             MarkdownEditor(text: $document.text, find: find, sync: sync,
                            initialLine: sync.target(for: .edit), focusPulse: detailFocus.pulse,
-                           fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth, selection: selection)
+                           fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth, selection: selection,
+                           cursor: editCursor)
         }
     }
 
@@ -154,6 +188,26 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .help("Toggle View / Edit  (⌘E)")
         }
+    }
+}
+
+/// Banner shown when the open file changed on disk while the buffer also has unsaved edits.
+/// Reload adopts the disk version; Keep Mine ignores it (the next save overwrites disk).
+private struct ExternalChangeBar: View {
+    let onReload: () -> Void
+    let onKeep: () -> Void
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Text("This file changed on disk.").font(.caption)
+            Spacer(minLength: 0)
+            Button("Reload", action: onReload)
+            Button("Keep Mine", action: onKeep)
+        }
+        .font(.caption)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.bar)
     }
 }
 

@@ -15,6 +15,11 @@ struct MarkdownWebView: NSViewRepresentable {
     var fullWidth: Bool = false
     /// Receives the rendered selection's character count for the bottom readout.
     var selection: SelectionController
+    /// Folder the open document lives in; relative in-document links resolve against it.
+    var docDirectory: URL?
+    /// Opens a markdown file in qmd (in-document link to another .md). Non-markdown links
+    /// and external (http/mailto) links are handed to the system instead.
+    var onOpenFile: (URL) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(sync: sync, selection: selection) }
 
@@ -23,6 +28,7 @@ struct MarkdownWebView: NSViewRepresentable {
         config.userContentController.add(context.coordinator, name: "ready")
         config.userContentController.add(context.coordinator, name: "scroll")
         config.userContentController.add(context.coordinator, name: "selection")
+        config.userContentController.add(context.coordinator, name: "openLink")
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground") // let CSS paint bg, avoid white flash
@@ -31,6 +37,8 @@ struct MarkdownWebView: NSViewRepresentable {
         context.coordinator.lastFocusPulse = focusPulse
         context.coordinator.fontScale = fontScale
         context.coordinator.fullWidth = fullWidth
+        context.coordinator.docDirectory = docDirectory
+        context.coordinator.onOpenFile = onOpenFile
 
         if let index = WebResources.indexURL(), let dir = WebResources.directory() {
             webView.loadFileURL(index, allowingReadAccessTo: dir)
@@ -39,6 +47,8 @@ struct MarkdownWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.docDirectory = docDirectory
+        context.coordinator.onOpenFile = onOpenFile
         context.coordinator.render(markdown)
         context.coordinator.applyFontScale(fontScale)
         context.coordinator.applyFullWidth(fullWidth)
@@ -59,6 +69,8 @@ struct MarkdownWebView: NSViewRepresentable {
         private var lastRendered: String?
         var pendingLine: Int?
         var lastFocusPulse = 0
+        var docDirectory: URL?
+        var onOpenFile: (URL) -> Void = { _ in }
         var fontScale: Double = 1
         private var appliedFontScale: Double = .nan
         var fullWidth = false
@@ -173,9 +185,34 @@ struct MarkdownWebView: NSViewRepresentable {
             case "selection":
                 let n = (message.body as? Int) ?? Int((message.body as? Double) ?? 0)
                 selection.report(max(0, n))
+            case "openLink":
+                if let href = message.body as? String { openLink(href) }
             default:
                 break
             }
+        }
+
+        /// Routes a clicked in-document link: http/https/mailto/ftp go to the system; a
+        /// relative/absolute file path resolves against the document's folder — markdown
+        /// opens in qmd, anything else (image, PDF, dir…) is handed to its default app.
+        private func openLink(_ href: String) {
+            let raw = href.trimmingCharacters(in: .whitespaces)
+            if let u = URL(string: raw), let scheme = u.scheme?.lowercased(),
+               ["http", "https", "mailto", "ftp"].contains(scheme) {
+                NSWorkspace.shared.open(u); return
+            }
+            // Strip #fragment / ?query, percent-decode, then resolve as a file path.
+            var path = raw
+            if let i = path.firstIndex(where: { $0 == "#" || $0 == "?" }) { path = String(path[..<i]) }
+            guard !path.isEmpty else { return }   // pure in-page anchor — JS handles scrolling
+            let decoded = path.removingPercentEncoding ?? path
+            let target: URL
+            if decoded.hasPrefix("/") { target = URL(fileURLWithPath: decoded) }
+            else if let dir = docDirectory { target = URL(fileURLWithPath: decoded, relativeTo: dir) }
+            else { return }
+            let std = target.standardizedFileURL
+            guard FileManager.default.fileExists(atPath: std.path) else { return }
+            if FileEntry.isMarkdown(std) { onOpenFile(std) } else { NSWorkspace.shared.open(std) }
         }
 
         func webView(_ webView: WKWebView,

@@ -64,6 +64,35 @@ final class SelectionController: ObservableObject {
     func clear() { if count != 0 { count = 0 } }
 }
 
+/// Single source of truth for the sidebar's expanded/collapsed state, shared across all
+/// tabs and windows. Each tab's NavigationSplitView is a separate view with its own
+/// column-visibility binding; pointing them all at this one object keeps the sidebar
+/// consistent as you switch tabs (and a newly opened tab inherits it). Per-process.
+final class SidebarVisibility: ObservableObject {
+    static let shared = SidebarVisibility()
+    @Published var columnVisibility: NavigationSplitViewVisibility = .all
+    private init() {}
+}
+
+/// Folders the sidebar shows expanded, shared across all tabs/windows so the disclosure
+/// state is one source of truth (keyed by absolute folder URL — unique per path, so
+/// different windows' trees don't collide). Per-process.
+final class SidebarExpansion: ObservableObject {
+    static let shared = SidebarExpansion()
+    @Published var expanded: Set<URL> = []
+    private init() {}
+}
+
+/// Carries the browsing root from the tab that triggers an open to the destination tab,
+/// so opening a file in a SUBFOLDER tabs into the same window and keeps the same sidebar
+/// root — instead of re-rooting at the subfolder and spawning a new window. Matched by the
+/// opened file's URL, like OpenFocusRouter. Stale entries are harmless (self-correcting).
+final class OpenRootRouter {
+    static let shared = OpenRootRouter()
+    var roots: [URL: URL] = [:]
+    private init() {}
+}
+
 /// Which side takes keyboard focus after a sidebar-initiated open.
 enum SidebarFocusTarget { case sidebar, detail }
 
@@ -77,6 +106,72 @@ final class OpenFocusRouter {
     static let shared = OpenFocusRouter()
     var pending: PendingFocus?
     private init() {}
+}
+
+/// Remembers the raw-editor caret position for the open file so switching to the rendered
+/// view (or another tab) and back restores the cursor instead of resetting to the top.
+/// Tab-scoped: lives as long as the file's tab (ContentView) is open.
+final class EditCursorStore: ObservableObject {
+    /// Caret offset (UTF-16) to restore, or nil until the editor has reported one.
+    var location: Int?
+}
+
+/// Watches the open file's folder and reconciles external edits with the editor: adopts
+/// changes silently when the buffer has no unsaved divergence, and raises a reload/keep-mine
+/// prompt when both the file and the buffer changed (so an external edit can't clobber
+/// unsaved work, and our own autosave isn't mistaken for an external change).
+@MainActor
+final class FileSync: ObservableObject {
+    /// External disk content awaiting a reload/keep decision; nil = no conflict banner.
+    @Published var conflict: String?
+
+    /// Read the live editor text. Set by ContentView.
+    var currentText: () -> String = { "" }
+    /// Replace the editor text with reloaded disk content. Set by ContentView.
+    var applyReload: (String) -> Void = { _ in }
+
+    private lazy var watcher = DirectoryWatcher { [weak self] in self?.recheck() }
+    private var url: URL?
+    private var snapshot: String?      // content last in sync with disk
+    private var acknowledged: String?  // disk content the user chose to keep-mine over
+
+    /// Begin watching `url`'s folder (no-op if already watching that file).
+    func start(url: URL?) {
+        guard let url, url != self.url else { return }
+        self.url = url
+        snapshot = currentText()
+        // ponytail: watches the whole parent dir (one extra FSEvents stream) and re-reads
+        // one file per event — cheap for markdown; swap to a file-scoped watch if it bites.
+        watcher.start(url: url.deletingLastPathComponent())
+    }
+
+    private func recheck() {
+        guard let url, let onDisk = try? String(contentsOf: url, encoding: .utf8) else { return }
+        let text = currentText()
+        if onDisk == text {                  // already matches (our own save / no real change)
+            snapshot = onDisk; acknowledged = nil
+            if conflict != nil { conflict = nil }
+            return
+        }
+        if onDisk == acknowledged { return } // user already chose to keep theirs over this
+        if text == snapshot {                // no local edits -> adopt the external change
+            snapshot = onDisk
+            applyReload(onDisk)
+        } else {                             // both diverged -> ask the user
+            conflict = onDisk
+        }
+    }
+
+    func reload() {
+        guard let c = conflict else { return }
+        snapshot = c; acknowledged = nil; conflict = nil
+        applyReload(c)
+    }
+
+    func keepMine() {
+        acknowledged = conflict
+        conflict = nil
+    }
 }
 
 // Focused value so the menu's Find commands reach the focused window's controller.

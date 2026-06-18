@@ -174,6 +174,20 @@ window.qmdFind = function (q, caseSensitive, backwards, fresh) {
   return window.find(q, !!caseSensitive, !!backwards, true, false, false, false);
 };
 
+// ---- link handling ---------------------------------------------------------
+// Route every link click to native (open .md in qmd, files in their default app,
+// http/mailto in the browser) instead of letting WebKit navigate. In-page anchors
+// (href="#...") are left alone so the page scrolls to the heading as usual.
+document.addEventListener('click', function (e) {
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (!href || href.charAt(0) === '#') return;
+  e.preventDefault();
+  const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.openLink;
+  if (h) h.postMessage(href);
+}, true);
+
 // signal native side that the page is ready
 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ready) {
   window.webkit.messageHandlers.ready.postMessage('ready');

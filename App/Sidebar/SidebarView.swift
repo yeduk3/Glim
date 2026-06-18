@@ -73,7 +73,7 @@ struct SidebarView: View {
                 List(selection: $sidebar.selection) {
                     Section {
                         ForEach(FileEntry.children(of: rootURL)) { entry in
-                            FileRow(entry: entry, currentFile: currentFile,
+                            FileRow(entry: entry, root: rootURL, currentFile: currentFile,
                                     tree: tree, sidebar: sidebar)
                         }
                     } header: {
@@ -158,6 +158,9 @@ struct SidebarView: View {
         // Opening may switch to another tab; park the focus intent for the destination
         // ContentView to claim once it shows this file.
         OpenFocusRouter.shared.pending = PendingFocus(url: url, target: focusDetail ? .detail : .sidebar)
+        // Park this sidebar's root so a file in a subfolder tabs into THIS window and keeps
+        // the same tree, instead of re-rooting at the subfolder / opening a new window.
+        if let rootURL { OpenRootRouter.shared.roots[url.standardizedFileURL] = rootURL }
         sidebar.captureScroll(root: rootURL)
         Task { try? await openDocument(at: url) }
     }
@@ -165,21 +168,34 @@ struct SidebarView: View {
 
 private struct FileRow: View {
     let entry: FileEntry
+    let root: URL?
     let currentFile: URL?
     @ObservedObject var tree: FileTreeModel
     @ObservedObject var sidebar: SidebarController
+    @ObservedObject private var expansion = SidebarExpansion.shared
 
-    @State private var expanded = false
     @State private var children: [FileEntry] = []
     @FocusState private var renameFocused: Bool
     @Environment(\.openDocument) private var openDocument
 
     private var isRenaming: Bool { sidebar.renamingURL == entry.url }
 
+    /// Disclosure state read from the shared store so it's one source of truth across tabs.
+    private var expandedBinding: Binding<Bool> {
+        Binding(
+            get: { expansion.expanded.contains(entry.url) },
+            set: { if $0 { expansion.expanded.insert(entry.url) } else { expansion.expanded.remove(entry.url) } }
+        )
+    }
+
+    private func reloadChildrenIfExpanded() {
+        children = expansion.expanded.contains(entry.url) ? FileEntry.children(of: entry.url) : []
+    }
+
     var body: some View {
         if entry.isDirectory {
-            DisclosureGroup(isExpanded: $expanded) {
-                ForEach(children) { FileRow(entry: $0, currentFile: currentFile, tree: tree, sidebar: sidebar) }
+            DisclosureGroup(isExpanded: expandedBinding) {
+                ForEach(children) { FileRow(entry: $0, root: root, currentFile: currentFile, tree: tree, sidebar: sidebar) }
             } label: {
                 if isRenaming {
                     renameField
@@ -189,12 +205,11 @@ private struct FileRow: View {
                 }
             }
             .tag(entry.url)
-            .onChange(of: expanded) { _, now in
-                if now { children = FileEntry.children(of: entry.url) }
-            }
-            .onChange(of: tree.version) { _, _ in
-                if expanded { children = FileEntry.children(of: entry.url) }
-            }
+            // Shared expansion -> load children when this folder becomes expanded (here or in
+            // another tab), and on first appearance if it's already expanded.
+            .onAppear { reloadChildrenIfExpanded() }
+            .onChange(of: expansion.expanded) { _, _ in reloadChildrenIfExpanded() }
+            .onChange(of: tree.version) { _, _ in reloadChildrenIfExpanded() }
             .contextMenu { rowMenu(newFileTarget: entry.url) }
         } else {
             Group {
@@ -259,7 +274,8 @@ private struct FileRow: View {
 
     private func newFile(in dir: URL) {
         guard let url = FileEntry.makeNewFile(in: dir) else { return }
-        if entry.isDirectory { expanded = true }
+        if entry.isDirectory { expansion.expanded.insert(entry.url) }
+        if let root { OpenRootRouter.shared.roots[url.standardizedFileURL] = root }
         tree.reload()
         Task { try? await openDocument(at: url) }
     }

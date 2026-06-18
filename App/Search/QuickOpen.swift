@@ -17,8 +17,12 @@ final class QuickOpenController: ObservableObject {
     @Published var selectedIndex = 0
     @Published private(set) var results: [QuickOpenItem] = []
     private var files: [QuickOpenItem] = []
+    /// Folder the visible palette is searching — the current tab's root for ⌘O, or a
+    /// user-picked folder for ⌘⇧O. Opening a file roots the destination window here.
+    private(set) var root: URL?
 
     func show(root: URL?) {
+        self.root = root
         files = Self.gather(root: root)
         query = ""        // didSet won't fire if already empty, so recompute explicitly below
         recompute()
@@ -363,11 +367,17 @@ private struct QuickOpenRow: View {
 // MARK: - ⌘O menu wiring
 
 struct QuickOpenActionKey: FocusedValueKey { typealias Value = () -> Void }
+struct OpenFolderActionKey: FocusedValueKey { typealias Value = () -> Void }
 
 extension FocusedValues {
     /// Invoked by the File ▸ Open… (⌘O) menu item to raise the focused window's palette.
     var quickOpenAction: (() -> Void)? {
         get { self[QuickOpenActionKey.self] }
         set { self[QuickOpenActionKey.self] = newValue }
+    }
+    /// Invoked by File ▸ Open Folder… (⌘⇧O): pick a folder, then open its palette.
+    var openFolderAction: (() -> Void)? {
+        get { self[OpenFolderActionKey.self] }
+        set { self[OpenFolderActionKey.self] = newValue }
     }
 }

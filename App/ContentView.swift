@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @Binding var document: MarkdownDocument
@@ -60,6 +61,7 @@ struct ContentView: View {
         .focusedSceneValue(\.newFileAction, createNewFile)
         .focusedSceneValue(\.focusSidebarAction, focusSidebar)
         .focusedSceneValue(\.quickOpenAction, { quickOpen.show(root: browsingRoot) })
+        .focusedSceneValue(\.openFolderAction, openOtherFolder)
         .background(WindowAccessor(rootKey: browsingRoot?.standardizedFileURL.path ?? "none"))
         // Toggling to the rendered view focuses it so arrow keys scroll immediately.
         // (The raw editor self-focuses on entry.) Only fires on an actual ⌘E toggle,
@@ -106,21 +108,38 @@ struct ContentView: View {
         Task { try? await openDocument(at: url) }
     }
 
+    /// ⌘⇧O: pick a folder, then raise the quick-open palette rooted there. Opening a file
+    /// from a different folder roots its (new) window at that folder, not the current one.
+    private func openOtherFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        panel.message = "Choose a folder to browse"
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        quickOpen.show(root: folder)
+    }
+
     /// Opens a file chosen from the ⌘O palette (markdown opens as a tab; anything else is
     /// handed to its default app), carrying the sidebar scroll position into the new tab.
     private func openFromQuickOpen(_ url: URL) {
         quickOpen.hide()
         guard FileEntry.isMarkdown(url) else { NSWorkspace.shared.open(url); return }
-        openInApp(url)
+        // Root the destination at the palette's folder (the picked one for ⌘⇧O, else this tab's).
+        open(url, rootedAt: quickOpen.root ?? browsingRoot)
     }
 
-    /// Opens a markdown file in qmd (as a tab in this folder's group), reusing the current
-    /// tab if it's already that file. Used by the ⌘O palette and in-document links.
-    private func openInApp(_ url: URL) {
+    /// Opens a markdown file in qmd from an in-document link, rooted at this tab's folder.
+    private func openInApp(_ url: URL) { open(url, rootedAt: browsingRoot) }
+
+    /// Opens a markdown file in qmd as a tab in `root`'s window group, reusing the current
+    /// tab if it's already that file. Files sharing `root` tab together; a different root
+    /// opens its own window (see WindowAccessor.rootKey).
+    private func open(_ url: URL, rootedAt root: URL?) {
         if fileURL?.standardizedFileURL == url.standardizedFileURL { detailFocus.focus(); return }
         OpenFocusRouter.shared.pending = PendingFocus(url: url, target: .detail)
-        // Hand the destination tab this tab's root so a subfolder file tabs in here.
-        if let root = browsingRoot { OpenRootRouter.shared.roots[url.standardizedFileURL] = root }
+        if let root { OpenRootRouter.shared.roots[url.standardizedFileURL] = root }
         sidebar.captureScroll(root: browsingRoot)
         Task { try? await openDocument(at: url) }
     }

@@ -14,6 +14,7 @@ struct qmdApp: App {
             CommandGroup(replacing: .newItem) {
                 NewFileCommands()
                 OpenFileCommand()
+                OpenFolderCommand()
             }
             CommandGroup(after: .textEditing) {
                 FindCommands()
@@ -79,6 +80,18 @@ private struct OpenFileCommand: View {
         Button("Open…") { openAction?() }
             .keyboardShortcut("o", modifiers: .command)
             .disabled(openAction == nil)
+    }
+}
+
+/// File-menu Open Folder… (⌘⇧O): picks a folder, then raises the focused window's
+/// quick-open palette rooted there. Disabled when no document is focused.
+private struct OpenFolderCommand: View {
+    @FocusedValue(\.openFolderAction) private var action: (() -> Void)?
+
+    var body: some View {
+        Button("Open Folder…") { action?() }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(action == nil)
     }
 }
 

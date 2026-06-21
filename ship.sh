@@ -14,13 +14,13 @@
 #   -y               skip the confirmation prompt
 #
 # Prerequisites (same as release.sh): a "Developer ID Application" certificate in the
-# keychain and a notarytool keychain profile (default name: qmd-notary). The Team ID is
-# read from the certificate automatically; override with QMD_TEAM_ID.
+# keychain and a notarytool keychain profile (default name: glim-notary). The Team ID is
+# read from the certificate automatically; override with GLIM_TEAM_ID.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-DD="${QMD_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/qmd-build}"
+DD="${GLIM_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/glim-build}"
 PROD="$DD/Build/Products"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -42,20 +42,20 @@ while getopts "m:n:y" opt; do
 done
 [ -n "$MSG" ] || MSG="release: v$VERSION"
 TAG="v$VERSION"
-ZIP="/tmp/qmd-$TAG-macos.zip"
+ZIP="/tmp/Glim-$TAG-macos.zip"
 
 # ---- preflight --------------------------------------------------------------
 git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
 command -v gh >/dev/null || die "gh CLI not found"
 gh auth status >/dev/null 2>&1 || die "gh not authenticated (run: gh auth login)"
 
-# Team ID from the Developer ID cert (or QMD_TEAM_ID override).
-if [ -z "${QMD_TEAM_ID:-}" ]; then
-  QMD_TEAM_ID="$(security find-identity -v -p codesigning 2>/dev/null \
+# Team ID from the Developer ID cert (or GLIM_TEAM_ID override).
+if [ -z "${GLIM_TEAM_ID:-}" ]; then
+  GLIM_TEAM_ID="$(security find-identity -v -p codesigning 2>/dev/null \
     | grep -m1 'Developer ID Application' | sed -E 's/.*\(([A-Z0-9]{10})\).*/\1/')"
-  [ -n "$QMD_TEAM_ID" ] || die "no 'Developer ID Application' certificate found and QMD_TEAM_ID unset"
+  [ -n "$GLIM_TEAM_ID" ] || die "no 'Developer ID Application' certificate found and GLIM_TEAM_ID unset"
 fi
-export QMD_TEAM_ID
+export GLIM_TEAM_ID
 
 # Don't clobber an existing release/tag.
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && die "tag $TAG already exists"
@@ -68,11 +68,11 @@ NEW_BUILD=$((CUR_BUILD + 1))
 
 cat <<PLAN
 
-  qmd ship plan
+  Glim ship plan
   -------------
   version     : $CUR_VERSION  ->  $VERSION   (build $CUR_BUILD -> $NEW_BUILD)
   branch      : $BRANCH
-  team id     : $QMD_TEAM_ID
+  team id     : $GLIM_TEAM_ID
   commit msg  : $(printf '%s' "$MSG" | head -1)
   notes       : ${NOTES_FILE:-<commit message>}
   steps       : bump -> commit+push -> build/notarize -> install /Applications -> gh release $TAG -> clean
@@ -101,33 +101,33 @@ echo "==> Building signed + notarized release (this waits on Apple)"
 
 # ---- 4. install to /Applications --------------------------------------------
 echo "==> Installing to /Applications"
-pkill -9 -f "qmd.app/Contents/MacOS/qmd" 2>/dev/null || true
+pkill -9 -f "Glim.app/Contents/MacOS/Glim" 2>/dev/null || true
 sleep 1
-rm -rf /tmp/qmd-ship-extract
-ditto -xk "$ZIP" /tmp/qmd-ship-extract
-rm -rf /Applications/qmd.app
-mv /tmp/qmd-ship-extract/qmd.app /Applications/qmd.app
-rm -rf /tmp/qmd-ship-extract
-"$LSREG" -f /Applications/qmd.app
-spctl -a -vvv -t exec /Applications/qmd.app 2>&1 | sed -n '1,3p' || true
+rm -rf /tmp/glim-ship-extract
+ditto -xk "$ZIP" /tmp/glim-ship-extract
+rm -rf /Applications/Glim.app
+mv /tmp/glim-ship-extract/Glim.app /Applications/Glim.app
+rm -rf /tmp/glim-ship-extract
+"$LSREG" -f /Applications/Glim.app
+spctl -a -vvv -t exec /Applications/Glim.app 2>&1 | sed -n '1,3p' || true
 
 # ---- 5. publish GitHub release ----------------------------------------------
 echo "==> Creating GitHub release $TAG"
 if [ -n "$NOTES_FILE" ]; then
-  gh release create "$TAG" "$ZIP" --title "qmd $TAG" --notes-file "$NOTES_FILE"
+  gh release create "$TAG" "$ZIP" --title "Glim $TAG" --notes-file "$NOTES_FILE"
 else
-  gh release create "$TAG" "$ZIP" --title "qmd $TAG" --notes "$MSG"
+  gh release create "$TAG" "$ZIP" --title "Glim $TAG" --notes "$MSG"
 fi
 
 # ---- 6. clean ---------------------------------------------------------------
 echo "==> Cleaning build artifacts"
-for app in "$PROD"/Debug/qmd.app "$PROD"/Release/qmd.app; do
+for app in "$PROD"/Debug/Glim.app "$PROD"/Release/Glim.app; do
   [ -d "$app" ] && "$LSREG" -u "$app" 2>/dev/null || true
 done
 rm -rf "$PROD/Debug" "$PROD/Release"
 rm -f "$ZIP"
 
 echo
-echo "==> Shipped qmd $TAG"
-echo "    installed: $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' /Applications/qmd.app/Contents/Info.plist)"
+echo "==> Shipped Glim $TAG"
+echo "    installed: $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' /Applications/Glim.app/Contents/Info.plist)"
 echo "    release  : $(gh release view "$TAG" --json url --jq .url)"

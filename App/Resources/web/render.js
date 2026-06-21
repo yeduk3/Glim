@@ -30,7 +30,7 @@ const md = window.markdownit({
 // Tag every top-level block with the 0-based source line it starts on. Most
 // block tokens render through renderToken/renderAttrs, so setting the attr is
 // enough; fenced code is special-cased because our `highlight` returns raw <pre>.
-md.core.ruler.push('qmd_source_line', function (state) {
+md.core.ruler.push('glim_source_line', function (state) {
   for (const t of state.tokens) {
     if (!t.map || t.level !== 0) continue;
     if (t.nesting === 1 || t.type === 'hr' || t.type === 'code_block' ||
@@ -65,7 +65,7 @@ window.renderMarkdown = function (src) {
 // ---- font zoom -------------------------------------------------------------
 // Scale every text size off the body font-size. Headings, code, KaTeX, etc. are
 // all sized in `em`, so scaling the body cascades to the whole document.
-window.qmdSetFontScale = function (scale) {
+window.glimSetFontScale = function (scale) {
   var s = (typeof scale === 'number' && scale > 0) ? scale : 1;
   document.body.style.fontSize = (16 * s) + 'px';
 };
@@ -73,12 +73,12 @@ window.qmdSetFontScale = function (scale) {
 // ---- full-width toggle -----------------------------------------------------
 // When on, content fills the viewport width; when off (default) it stays capped
 // to a readable measure and centered. Kept in sync with the raw editor.
-window.qmdSetFullWidth = function (full) {
+window.glimSetFullWidth = function (full) {
   document.body.classList.toggle('full-width', !!full);
   // Enable the width transition only after the initial apply has painted, so opening
   // a doc that was saved full-width snaps to width instead of animating on load.
-  if (!window.__qmdWidthAnim) {
-    window.__qmdWidthAnim = true;
+  if (!window.__glimWidthAnim) {
+    window.__glimWidthAnim = true;
     requestAnimationFrame(function () {
       requestAnimationFrame(function () { document.body.classList.add('anim'); });
     });
@@ -87,7 +87,7 @@ window.qmdSetFullWidth = function (full) {
 
 // ---- scroll sync API -------------------------------------------------------
 // 0-based source line of the block at the top of the viewport (interpolated).
-window.qmdGetTopLine = function () {
+window.glimGetTopLine = function () {
   const els = document.querySelectorAll('[data-source-line]');
   let prev = null;
   for (const el of els) {
@@ -106,7 +106,7 @@ window.qmdGetTopLine = function () {
 };
 
 // Scroll so that source `line` sits at the top of the viewport.
-window.qmdScrollToLine = function (line) {
+window.glimScrollToLine = function (line) {
   const els = document.querySelectorAll('[data-source-line]');
   if (!els.length) return;
   let lo = null, hi = null;
@@ -127,21 +127,21 @@ window.qmdScrollToLine = function (line) {
   window.scrollTo(0, Math.max(0, y));
 };
 
-let qmdScrollTimer = null;
+let glimScrollTimer = null;
 window.addEventListener('scroll', function () {
-  if (qmdScrollTimer) return;
-  qmdScrollTimer = setTimeout(function () {
-    qmdScrollTimer = null;
+  if (glimScrollTimer) return;
+  glimScrollTimer = setTimeout(function () {
+    glimScrollTimer = null;
     const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scroll;
-    if (h) h.postMessage(window.qmdGetTopLine());
+    if (h) h.postMessage(window.glimGetTopLine());
   }, 80);
 }, { passive: true });
 
 // ---- selection character count ---------------------------------------------
 // Report the selected text's length (code points, ~user-visible chars) to native,
 // debounced. 0 when the selection is empty/collapsed so the readout hides.
-let qmdSelTimer = null;
-function qmdReportSelection() {
+let glimSelTimer = null;
+function glimReportSelection() {
   const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.selection;
   if (!h) return;
   const s = window.getSelection();
@@ -149,12 +149,12 @@ function qmdReportSelection() {
   h.postMessage(str ? Array.from(str).length : 0);
 }
 document.addEventListener('selectionchange', function () {
-  if (qmdSelTimer) return;
-  qmdSelTimer = setTimeout(function () { qmdSelTimer = null; qmdReportSelection(); }, 120);
+  if (glimSelTimer) return;
+  glimSelTimer = setTimeout(function () { glimSelTimer = null; glimReportSelection(); }, 120);
 });
 
 // ---- in-page find ----------------------------------------------------------
-window.qmdCountMatches = function (q, caseSensitive) {
+window.glimCountMatches = function (q, caseSensitive) {
   if (!q) return 0;
   const text = document.body.innerText || '';
   const hay = caseSensitive ? text : text.toLowerCase();
@@ -167,7 +167,7 @@ window.qmdCountMatches = function (q, caseSensitive) {
 
 // `fresh` (new query) searches from the document start; otherwise continues
 // from the current selection so next/prev step through matches.
-window.qmdFind = function (q, caseSensitive, backwards, fresh) {
+window.glimFind = function (q, caseSensitive, backwards, fresh) {
   const sel = window.getSelection();
   if (!q) { sel.removeAllRanges(); return false; }
   if (fresh) sel.removeAllRanges();
@@ -175,7 +175,7 @@ window.qmdFind = function (q, caseSensitive, backwards, fresh) {
 };
 
 // ---- link handling ---------------------------------------------------------
-// Route every link click to native (open .md in qmd, files in their default app,
+// Route every link click to native (open .md in Glim, files in their default app,
 // http/mailto in the browser) instead of letting WebKit navigate. In-page anchors
 // (href="#...") are left alone so the page scrolls to the heading as usual.
 document.addEventListener('click', function (e) {

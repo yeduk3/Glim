@@ -1,31 +1,31 @@
 #!/bin/bash
-# Build a Developer ID-signed, Apple-notarized, stapled, Universal qmd.app and zip it.
+# Build a Developer ID-signed, Apple-notarized, stapled, Universal Glim.app and zip it.
 #
 # Prerequisites (one-time):
 #   - A "Developer ID Application" certificate in your keychain
 #     (Xcode → Settings → Accounts → Manage Certificates → + → Developer ID Application)
 #   - A notarytool keychain profile:
-#       xcrun notarytool store-credentials qmd-notary \
+#       xcrun notarytool store-credentials glim-notary \
 #         --apple-id you@example.com --team-id XXXXXXXXXX --password <app-specific-password>
 #
 # Usage:
-#   QMD_TEAM_ID=XXXXXXXXXX ./release.sh [version]
+#   GLIM_TEAM_ID=XXXXXXXXXX ./release.sh [version]
 set -e
 cd "$(dirname "$0")"
 
 VERSION="${1:-1.0.0}"
-TEAM_ID="${QMD_TEAM_ID:?set QMD_TEAM_ID to your 10-char Apple Developer Team ID}"
-SIGN_ID="${QMD_SIGN_ID:-Developer ID Application}"
-NOTARY_PROFILE="${QMD_NOTARY_PROFILE:-qmd-notary}"
-DD="$HOME/Library/Developer/Xcode/DerivedData/qmd-build"
-APP="$DD/Build/Products/Release/qmd.app"
-ZIP="/tmp/qmd-v$VERSION-macos.zip"
+TEAM_ID="${GLIM_TEAM_ID:?set GLIM_TEAM_ID to your 10-char Apple Developer Team ID}"
+SIGN_ID="${GLIM_SIGN_ID:-Developer ID Application}"
+NOTARY_PROFILE="${GLIM_NOTARY_PROFILE:-glim-notary}"
+DD="$HOME/Library/Developer/Xcode/DerivedData/glim-build"
+APP="$DD/Build/Products/Release/Glim.app"
+ZIP="/tmp/Glim-v$VERSION-macos.zip"
 
 command -v xcodegen >/dev/null && xcodegen generate
 
 echo "==> Building Universal Release, signed with Developer ID + hardened runtime"
 rm -rf "$DD/Build/Products/Release"
-xcodebuild -project qmd.xcodeproj -scheme qmd -configuration Release -derivedDataPath "$DD" \
+xcodebuild -project Glim.xcodeproj -scheme Glim -configuration Release -derivedDataPath "$DD" \
   ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
   CODE_SIGN_STYLE=Manual \
   CODE_SIGN_IDENTITY="$SIGN_ID" \
@@ -47,7 +47,7 @@ spctl -a -vvv -t exec "$APP" || true
 
 # The notarized .app now lives in $ZIP. Leaving the DerivedData build copy on
 # disk lets Launch Services register it; once the same app is also installed to
-# /Applications, two bundles share com.gyu.qmd(.QuickLookExtension) and pkd
+# /Applications, two bundles share com.gyu.glim(.QuickLookExtension) and pkd
 # rejects one ("another plugin has precedent") — silently killing Quick Look.
 # Drop the build copy so only the installed copy is ever registered.
 echo "==> Cleanup: unregister + remove DerivedData build copy (prevents duplicate bundle-id that breaks Quick Look)"

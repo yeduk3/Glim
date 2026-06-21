@@ -1,21 +1,21 @@
 <div align="center">
 
-<img src="assets/icon.png" width="128" alt="qmd icon">
+<img src="assets/icon.png" width="128" alt="Glim icon">
 
-# qmd
+# Glim
 
 **A minimal, native macOS Markdown editor.**
 
 Two modes — clean **View** and raw **Edit**. Folder sidebar, offline **LaTeX**, and **Quick Look** previews from Finder.
 
-[![release](https://img.shields.io/github/v/release/yeduk3/qmd)](https://github.com/yeduk3/qmd/releases/latest)
+[![release](https://img.shields.io/github/v/release/yeduk3/Glim)](https://github.com/yeduk3/Glim/releases/latest)
 ![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
 ![swift](https://img.shields.io/badge/Swift-5-orange)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 <br>
 
-<img src="assets/screenshot-view.png" width="860" alt="qmd — View mode: sidebar, tabs, rendered Markdown with KaTeX math and syntax-highlighted code">
+<img src="assets/screenshot-view.png" width="860" alt="Glim — View mode: sidebar, tabs, rendered Markdown with KaTeX math and syntax-highlighted code">
 
 </div>
 
@@ -54,28 +54,28 @@ Toggle with `⌘E` — *View* renders KaTeX math, tables, and highlighted code; 
 
 ### Download (prebuilt)
 
-Grab the latest **[qmd.app from Releases](https://github.com/yeduk3/qmd/releases/latest)** (Universal — Apple Silicon + Intel), unzip, and move it to `/Applications`. The app is signed with a Developer ID and **notarized by Apple**, so it opens with no Gatekeeper warnings.
+Grab the latest **[Glim.app from Releases](https://github.com/yeduk3/Glim/releases/latest)** (Universal — Apple Silicon + Intel), unzip, and move it to `/Applications`. The app is signed with a Developer ID and **notarized by Apple**, so it opens with no Gatekeeper warnings.
 
-Launch it once to register the Quick Look extension. To make it your default Markdown app: right-click a `.md` → **Get Info** → **Open with** → **qmd** → **Change All…**
+Launch it once to register the Quick Look extension. To make it your default Markdown app: right-click a `.md` → **Get Info** → **Open with** → **Glim** → **Change All…**
 
 ### Build from source
 
 ```bash
-git clone https://github.com/yeduk3/qmd.git
-cd qmd
+git clone https://github.com/yeduk3/Glim.git
+cd Glim
 ./install.sh
 ```
 
-`install.sh` builds a Release version, copies **qmd.app** to `/Applications`, registers it with Launch Services, sets it as the default handler for Markdown, and enables the Quick Look extension.
+`install.sh` builds a Release version, copies **Glim.app** to `/Applications`, registers it with Launch Services, sets it as the default handler for Markdown, and enables the Quick Look extension.
 
 To build without installing:
 
 ```bash
-./build.sh            # Release  -> ~/Library/Developer/Xcode/DerivedData/qmd-build/...
+./build.sh            # Release  -> ~/Library/Developer/Xcode/DerivedData/glim-build/...
 ./build.sh Debug      # Debug
 ```
 
-> Builds intentionally target DerivedData **outside** the repo to avoid Spotlight/indexer churn. `build/`, `DerivedData/`, and the generated `qmd.xcodeproj` are git-ignored — `project.yml` is the source of truth.
+> Builds intentionally target DerivedData **outside** the repo to avoid Spotlight/indexer churn. `build/`, `DerivedData/`, and the generated `Glim.xcodeproj` are git-ignored — `project.yml` is the source of truth.
 
 ### Cut a release
 
@@ -86,7 +86,7 @@ One command does the whole flow — bump version, commit, push, build + sign + n
 ./ship.sh 1.1.5 -m "release: …" -n notes.md -y    # custom message + notes, no prompt
 ```
 
-It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads the Team ID from your Developer ID certificate, and refuses to clobber an existing tag/release. Requires the same signing prerequisites as `release.sh` (a *Developer ID Application* cert and a `notarytool` keychain profile, default `qmd-notary`). The build/sign/notarize step is `release.sh`; `ship.sh` wraps the git + install + publish + clean around it.
+It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads the Team ID from your Developer ID certificate, and refuses to clobber an existing tag/release. Requires the same signing prerequisites as `release.sh` (a *Developer ID Application* cert and a `notarytool` keychain profile, default `glim-notary`). The build/sign/notarize step is `release.sh`; `ship.sh` wraps the git + install + publish + clean around it.
 
 ## Usage
 
@@ -100,9 +100,9 @@ It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads t
 | Jump to tab _n_ | `⌘1` … `⌘9` |
 | Quick Look preview | Select a `.md` in Finder, press <kbd>space</kbd> |
 
-### Make qmd the default Markdown app
+### Make Glim the default Markdown app
 
-`install.sh` does this automatically. To set it manually: right-click any `.md` in Finder → **Get Info** → **Open with** → **qmd** → **Change All…**
+`install.sh` does this automatically. To set it manually: right-click any `.md` in Finder → **Get Info** → **Open with** → **Glim** → **Change All…**
 
 ## How it works
 
@@ -128,14 +128,14 @@ release.sh / ship.sh     sign+notarize · one-command release (bump→publish→
 ## Uninstall
 
 ```bash
-rm -rf /Applications/qmd.app
+rm -rf /Applications/Glim.app
 ```
 
 (Reset the default app for `.md` via Finder → Get Info if desired.)
 
 ## Credits & Acknowledgements
 
-- **[sbarex/QLMarkdown](https://github.com/sbarex/QLMarkdown)** — qmd's Quick Look extension was made by **referencing this project**. Studying its source is what made the data-based preview work (see [How it works](#how-it-works)). Huge thanks. 🙏
+- **[sbarex/QLMarkdown](https://github.com/sbarex/QLMarkdown)** — Glim's Quick Look extension was made by **referencing this project**. Studying its source is what made the data-based preview work (see [How it works](#how-it-works)). Huge thanks. 🙏
 - Rendering powered by [markdown-it](https://github.com/markdown-it/markdown-it), [KaTeX](https://katex.org), [highlight.js](https://highlightjs.org), and [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath).
 
 ## License

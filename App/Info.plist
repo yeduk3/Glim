@@ -13,7 +13,7 @@
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundleDisplayName</key>
-    <string>qmd</string>
+    <string>Glim</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -27,7 +27,7 @@
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>NSHumanReadableCopyright</key>
-    <string>qmd — minimal Markdown editor</string>
+    <string>Glim — minimal Markdown editor</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 @main
-struct qmdApp: App {
+struct GlimApp: App {
     var body: some Scene {
         DocumentGroup(newDocument: MarkdownDocument()) { config in
             ContentView(document: config.$document, fileURL: config.fileURL)

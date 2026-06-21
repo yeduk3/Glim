@@ -130,10 +130,10 @@ struct ContentView: View {
         open(url, rootedAt: quickOpen.root ?? browsingRoot)
     }
 
-    /// Opens a markdown file in qmd from an in-document link, rooted at this tab's folder.
+    /// Opens a markdown file in Glim from an in-document link, rooted at this tab's folder.
     private func openInApp(_ url: URL) { open(url, rootedAt: browsingRoot) }
 
-    /// Opens a markdown file in qmd as a tab in `root`'s window group, reusing the current
+    /// Opens a markdown file in Glim as a tab in `root`'s window group, reusing the current
     /// tab if it's already that file. Files sharing `root` tab together; a different root
     /// opens its own window (see WindowAccessor.rootKey).
     private func open(_ url: URL, rootedAt root: URL?) {
@@ -279,14 +279,14 @@ private struct WindowAccessor: NSViewRepresentable {
     }
 
     final class Coordinator {
-        private static let sizeKey = "qmd.windowSize"
+        private static let sizeKey = "glim.windowSize"
         private static let registry = NSHashTable<NSWindow>.weakObjects()
         private let rootKey: String
         private var token: NSObjectProtocol?
 
         init(rootKey: String) { self.rootKey = rootKey }
 
-        private var tabID: NSWindow.TabbingIdentifier { "qmd::\(rootKey)" }
+        private var tabID: NSWindow.TabbingIdentifier { "glim::\(rootKey)" }
 
         /// Last user-chosen window size, or a sensible default if none cached yet.
         private static func cachedSize() -> NSSize {
@@ -301,7 +301,7 @@ private struct WindowAccessor: NSViewRepresentable {
             window.tabbingMode = .preferred
             window.tabbingIdentifier = tabID
 
-            // An existing qmd window for the SAME root is the tab host. Look past our
+            // An existing Glim window for the SAME root is the tab host. Look past our
             // weak registry to every app window, so a momentary registry miss during
             // rapid opening can't spawn a stray un-tabbed window — that stray window was
             // what knocked a single Magnet-snapped window out of its arrangement.
@@ -339,7 +339,7 @@ private struct WindowAccessor: NSViewRepresentable {
             }
         }
 
-        /// An existing live qmd window sharing this tab id — registry first, then a
+        /// An existing live Glim window sharing this tab id — registry first, then a
         /// sweep of all app windows in case the registry hasn't caught up yet.
         private func existingHost(excluding window: NSWindow) -> NSWindow? {
             let match: (NSWindow) -> Bool = { $0 !== window && $0.tabbingIdentifier == self.tabID }

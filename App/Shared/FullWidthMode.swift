@@ -7,7 +7,7 @@ import SwiftUI
 final class FullWidthMode: ObservableObject {
     static let shared = FullWidthMode()
 
-    private static let key = "qmd.fullWidth"
+    private static let key = "glim.fullWidth"
 
     @Published private(set) var isFullWidth: Bool
 

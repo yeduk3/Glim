@@ -1,4 +1,4 @@
-name: qmd
+name: Glim
 options:
   bundleIdPrefix: com.gyu
   deploymentTarget:
@@ -17,7 +17,7 @@ settings:
     PRODUCT_NAME: "$(TARGET_NAME)"
     ENABLE_HARDENED_RUNTIME: "NO"
 targets:
-  qmd:
+  Glim:
     type: application
     platform: macOS
     sources:
@@ -31,17 +31,17 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gyu.qmd
+        PRODUCT_BUNDLE_IDENTIFIER: com.gyu.glim
         INFOPLIST_FILE: App/Info.plist
         COMBINE_HIDPI_IMAGES: "YES"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
         # Debug uses a separate bundle id so local/Xcode builds in DerivedData never
-        # share com.gyu.qmd with the installed /Applications release. Same-id duplicates
+        # share com.gyu.glim with the installed /Applications release. Same-id duplicates
         # make pkd reject one Quick Look plug-in (silently killing preview) and let
         # Launch Services flip the .md handler to a transient build copy.
         Debug:
-          PRODUCT_BUNDLE_IDENTIFIER: com.gyu.qmd.debug
+          PRODUCT_BUNDLE_IDENTIFIER: com.gyu.glim.debug
     dependencies:
       - target: QuickLookExtension
         embed: true
@@ -59,11 +59,11 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.gyu.qmd.QuickLookExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.gyu.glim.QuickLookExtension
         PRODUCT_MODULE_NAME: QuickLookExtension
         INFOPLIST_FILE: QuickLook/Info.plist
         CODE_SIGN_ENTITLEMENTS: QuickLook/QuickLook.entitlements
       configs:
-        # Must stay prefixed by the host app id (com.gyu.qmd.debug) for Debug.
+        # Must stay prefixed by the host app id (com.gyu.glim.debug) for Debug.
         Debug:
-          PRODUCT_BUNDLE_IDENTIFIER: com.gyu.qmd.debug.QuickLookExtension
+          PRODUCT_BUNDLE_IDENTIFIER: com.gyu.glim.debug.QuickLookExtension

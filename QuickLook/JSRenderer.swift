@@ -8,7 +8,7 @@ import os
 /// output needs no JavaScript at display time (KaTeX is pre-rendered to HTML+CSS),
 /// so Quick Look's HTML renderer shows it correctly.
 enum JSRenderer {
-    private static let log = Logger(subsystem: "com.gyu.qmd.ql", category: "jsrender")
+    private static let log = Logger(subsystem: "com.gyu.glim.ql", category: "jsrender")
 
     static func htmlDocument(markdown: String, bundle: Bundle) -> String {
         let web = WebResources.directory(in: bundle)

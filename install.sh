@@ -3,21 +3,21 @@
 set -e
 cd "$(dirname "$0")"
 
-DD="${QMD_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/qmd-build}"
+DD="${GLIM_DERIVED_DATA:-$HOME/Library/Developer/Xcode/DerivedData/glim-build}"
 ./build.sh Release
-APP="$DD/Build/Products/Release/qmd.app"
+APP="$DD/Build/Products/Release/Glim.app"
 
 LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
-echo "Install -> /Applications/qmd.app"
-rm -rf /Applications/qmd.app
-cp -R "$APP" /Applications/qmd.app
+echo "Install -> /Applications/Glim.app"
+rm -rf /Applications/Glim.app
+cp -R "$APP" /Applications/Glim.app
 
 # avoid duplicate bundle-id copies confusing Launch Services
 "$LSREG" -u "$APP" 2>/dev/null || true
-"$LSREG" -f /Applications/qmd.app
+"$LSREG" -f /Applications/Glim.app
 
-# set qmd as default app for Markdown
+# set Glim as default app for Markdown
 swift - <<'SWIFT' 2>/dev/null || true
 import AppKit
 import UniformTypeIdentifiers
@@ -25,7 +25,7 @@ let sem = DispatchSemaphore(value: 0)
 if let md = UTType("net.daringfireball.markdown") {
     Task {
         try? await NSWorkspace.shared.setDefaultApplication(
-            at: URL(fileURLWithPath: "/Applications/qmd.app"), toOpen: md)
+            at: URL(fileURLWithPath: "/Applications/Glim.app"), toOpen: md)
         sem.signal()
     }
     sem.wait()

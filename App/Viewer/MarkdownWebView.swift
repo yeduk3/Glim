@@ -17,7 +17,7 @@ struct MarkdownWebView: NSViewRepresentable {
     var selection: SelectionController
     /// Folder the open document lives in; relative in-document links resolve against it.
     var docDirectory: URL?
-    /// Opens a markdown file in qmd (in-document link to another .md). Non-markdown links
+    /// Opens a markdown file in Glim (in-document link to another .md). Non-markdown links
     /// and external (http/mailto) links are handed to the system instead.
     var onOpenFile: (URL) -> Void = { _ in }
 
@@ -102,7 +102,7 @@ struct MarkdownWebView: NSViewRepresentable {
             fontScale = scale
             guard ready, scale != appliedFontScale else { return }
             appliedFontScale = scale
-            webView?.evaluateJavaScript("window.qmdSetFontScale(\(scale));", completionHandler: nil)
+            webView?.evaluateJavaScript("window.glimSetFontScale(\(scale));", completionHandler: nil)
         }
 
         /// Push the full-width state into the page (no-op until ready, de-duped).
@@ -110,7 +110,7 @@ struct MarkdownWebView: NSViewRepresentable {
             fullWidth = full
             guard ready, full != appliedFullWidth else { return }
             appliedFullWidth = full
-            webView?.evaluateJavaScript("window.qmdSetFullWidth(\(full));", completionHandler: nil)
+            webView?.evaluateJavaScript("window.glimSetFullWidth(\(full));", completionHandler: nil)
         }
 
         // MARK: find
@@ -143,11 +143,11 @@ struct MarkdownWebView: NSViewRepresentable {
 
         private func performFind(_ find: FindController, backwards: Bool, fresh: Bool) {
             let q = find.query, cs = find.caseSensitive
-            let js = "window.qmdFind(\(WebResources.jsLiteral(q)), \(cs), \(backwards), \(fresh));"
+            let js = "window.glimFind(\(WebResources.jsLiteral(q)), \(cs), \(backwards), \(fresh));"
             webView?.evaluateJavaScript(js) { [weak self] res, _ in
                 let found = (res as? Bool) ?? false
                 self?.webView?.evaluateJavaScript(
-                    "window.qmdCountMatches(\(WebResources.jsLiteral(q)), \(cs));") { c, _ in
+                    "window.glimCountMatches(\(WebResources.jsLiteral(q)), \(cs));") { c, _ in
                     let n = (c as? Int) ?? Int((c as? Double) ?? 0)
                     if n == 0 && !found { self?.setStatus(find, "Not found") }
                     else { self?.setStatus(find, "\(n) match\(n == 1 ? "" : "es")") }
@@ -176,7 +176,7 @@ struct MarkdownWebView: NSViewRepresentable {
                 if let line = pendingLine {
                     pendingLine = nil
                     webView?.evaluateJavaScript(
-                        "requestAnimationFrame(function(){window.qmdScrollToLine(\(line));});",
+                        "requestAnimationFrame(function(){window.glimScrollToLine(\(line));});",
                         completionHandler: nil)
                 }
             case "scroll":
@@ -194,7 +194,7 @@ struct MarkdownWebView: NSViewRepresentable {
 
         /// Routes a clicked in-document link: http/https/mailto/ftp go to the system; a
         /// relative/absolute file path resolves against the document's folder — markdown
-        /// opens in qmd, anything else (image, PDF, dir…) is handed to its default app.
+        /// opens in Glim, anything else (image, PDF, dir…) is handed to its default app.
         private func openLink(_ href: String) {
             let raw = href.trimmingCharacters(in: .whitespaces)
             if let u = URL(string: raw), let scheme = u.scheme?.lowercased(),

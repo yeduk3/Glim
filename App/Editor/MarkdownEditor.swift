@@ -41,11 +41,11 @@ private struct LintBar: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.1), in: Capsule())
+                        .background(.quaternary, in: Capsule())
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 5)
+            .padding(.horizontal, 12).padding(.vertical, 6)
         }
         .background(.bar)
     }
@@ -90,9 +90,10 @@ private struct RawTextView: NSViewRepresentable {
         tv.isGrammarCheckingEnabled = false
         tv.allowsUndo = true
         tv.usesFindBar = false // app provides its own unified find bar
-        tv.textContainerInset = NSSize(width: 8, height: 12)
+        tv.textContainerInset = NSSize(width: 8, height: 16)
         tv.textColor = .textColor
         tv.backgroundColor = .textBackgroundColor
+        applyTypography(tv)   // line spacing for readability (see DESIGN.md §3)
 
         // soft wrap to the view width
         tv.isHorizontallyResizable = false
@@ -140,6 +141,7 @@ private struct RawTextView: NSViewRepresentable {
             let sel = tv.selectedRange()
             tv.string = text
             tv.setSelectedRange(NSRange(location: min(sel.location, (text as NSString).length), length: 0))
+            applyTypography(tv)   // re-apply line spacing to the replaced text
             context.coordinator.matchesStale = true
         }
         if context.coordinator.lastFontSize != fontSize {
@@ -160,6 +162,19 @@ private struct RawTextView: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
         coordinator.reportNow() // capture final scroll position before the view goes away
+    }
+
+    /// Line spacing for the raw editor — gives source text the same breathing room
+    /// the rendered view has. Applied as the default + typing paragraph style and over
+    /// the existing text. Find/lint use *temporary* (layout-manager) attributes, so this
+    /// textStorage attribute never clobbers them.
+    private func applyTypography(_ tv: NSTextView) {
+        let ps = NSMutableParagraphStyle()
+        ps.lineHeightMultiple = 1.3
+        tv.defaultParagraphStyle = ps
+        tv.typingAttributes[.paragraphStyle] = ps
+        let full = NSRange(location: 0, length: (tv.string as NSString).length)
+        tv.textStorage?.addAttribute(.paragraphStyle, value: ps, range: full)
     }
 
     private func applyUnderlines(_ tv: NSTextView) {

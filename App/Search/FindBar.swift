@@ -43,7 +43,7 @@ struct FindBar: View {
                 .help("Close (Esc)")
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)
         .onAppear { focused = true }

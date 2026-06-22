@@ -225,8 +225,8 @@ private struct ExternalChangeBar: View {
             Button("Keep Mine", action: onKeep)
         }
         .font(.caption)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(.bar)
     }
 }
@@ -242,8 +242,8 @@ private struct SelectionCountBar: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .background(.bar)
     }
 }

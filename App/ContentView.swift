@@ -46,7 +46,8 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $sidebarVis.columnVisibility) {
             SidebarView(rootURL: browsingRoot, currentFile: fileURL,
                         tree: tree, sidebar: sidebar, detailFocus: detailFocus,
-                        openFile: { url in Task { try? await openDocument(at: url) } })
+                        openFile: { url in Task { try? await openDocument(at: url) } },
+                        showsNewFile: false)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 420)
         } detail: {
             detail
@@ -193,6 +194,12 @@ struct ContentView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: createNewFile) {
+                Image(systemName: "square.and.pencil")
+            }
+            .help("New Markdown File  (⌘N)")
+        }
         ToolbarItem(placement: .primaryAction) {
             Toggle(isOn: Binding(get: { fullWidth.isFullWidth },
                                  set: { _ in fullWidth.toggle() })) {

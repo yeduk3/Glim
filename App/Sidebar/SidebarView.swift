@@ -69,6 +69,9 @@ struct SidebarView: View {
     /// folder-browser window (no document scene, so no `openDocument` env) routes through
     /// NSDocumentController instead. Root-parking around the call stays in this view.
     let openFile: (URL) -> Void
+    /// Show the small New File button in the section header. ContentView hides it (it has a
+    /// full-size New File toolbar button); the folder-browser window keeps it.
+    var showsNewFile = true
 
     var body: some View {
         Group {
@@ -82,12 +85,14 @@ struct SidebarView: View {
                     } header: {
                         HStack {
                             Text(rootURL.lastPathComponent.removingPercentEncoding ?? rootURL.lastPathComponent)
-                            Spacer()
-                            Button { newFile(in: rootURL) } label: {
-                                Image(systemName: "doc.badge.plus")
+                            if showsNewFile {
+                                Spacer()
+                                Button { newFile(in: rootURL) } label: {
+                                    Image(systemName: "doc.badge.plus")
+                                }
+                                .buttonStyle(.plain)
+                                .help("New Markdown File  (⌘N)")
                             }
-                            .buttonStyle(.plain)
-                            .help("New Markdown File  (⌘N)")
                         }
                     }
                 }

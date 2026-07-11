@@ -18,7 +18,8 @@ settings:
     ENABLE_HARDENED_RUNTIME: "NO"
 packages:
   MarkdownEditorKit:
-    path: ../MarkdownEditorKit
+    url: https://github.com/yeduk3/MarkdownEditorKit.git
+    from: 1.0.0
 targets:
   Glim:
     type: application

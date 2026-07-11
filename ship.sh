@@ -111,6 +111,16 @@ rm -rf /tmp/glim-ship-extract
 "$LSREG" -f /Applications/Glim.app
 spctl -a -vvv -t exec /Applications/Glim.app 2>&1 | sed -n '1,3p' || true
 
+# Activate the Quick Look extension WITHOUT a first manual launch. A plain lsregister
+# publishes the host app to Launch Services but doesn't make pkd register the bundled
+# app-extension — that only happened after the user first opened the app (opening a
+# folder), which is why QL looked dead in fresh folders until then. Nudge pluginkit to
+# adopt the appex now, then reset the Quick Look daemon + cache so it picks up the new
+# generator immediately (install.sh already did the qlmanage reset; ship.sh didn't).
+pluginkit -a "/Applications/Glim.app/Contents/PlugIns/QuickLookExtension.appex" 2>/dev/null || true
+qlmanage -r >/dev/null 2>&1 || true
+qlmanage -r cache >/dev/null 2>&1 || true
+
 # ---- 5. publish GitHub release ----------------------------------------------
 echo "==> Creating GitHub release $TAG"
 if [ -n "$NOTES_FILE" ]; then

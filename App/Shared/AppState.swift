@@ -1,37 +1,14 @@
 import SwiftUI
-
-/// Drives the in-file find bar. Both the rendered (`MarkdownWebView`) and raw
-/// (`MarkdownEditor`) views observe it and perform the search in their own way.
-final class FindController: ObservableObject {
-    @Published var isVisible = false
-    @Published var query = ""
-    @Published var caseSensitive = false
-    /// Bumped to request a jump to the next/previous match. `backwards` selects direction.
-    @Published var navToken = 0
-    @Published var backwards = false
-    /// Result text shown in the bar, e.g. "3/12" or "Not found".
-    @Published var status = ""
-    /// Bumped to pull keyboard focus back into the find field (⌘F when already open).
-    @Published var focusPulse = 0
-
-    func show() {
-        isVisible = true
-        focusPulse &+= 1
-    }
-    func hide() {
-        isVisible = false
-        query = ""
-        status = ""
-    }
-    func next() { backwards = false; navToken &+= 1 }
-    func prev() { backwards = true; navToken &+= 1 }
-}
+import MarkdownEditorKit
 
 /// Carries the top-visible source line between the rendered and raw views so the
 /// ⌘E switch lands on the same place. `source` records which view last set it;
 /// the incoming view scrolls to `line` only when the *other* view set it.
 final class ScrollSync: ObservableObject {
-    private(set) var line = 0
+    /// Published so the outline panel can highlight the current section as you scroll.
+    /// `report()` is only ever called on the main thread (WKScriptMessage delivery and the
+    /// editor's main-queue scroll hop), so the publish is main-thread safe.
+    @Published private(set) var line = 0
     /// True once either view has reported a position; until then there's nothing to restore.
     private(set) var primed = false
 
@@ -106,14 +83,6 @@ final class OpenFocusRouter {
     static let shared = OpenFocusRouter()
     var pending: PendingFocus?
     private init() {}
-}
-
-/// Remembers the raw-editor caret position for the open file so switching to the rendered
-/// view (or another tab) and back restores the cursor instead of resetting to the top.
-/// Tab-scoped: lives as long as the file's tab (ContentView) is open.
-final class EditCursorStore: ObservableObject {
-    /// Caret offset (UTF-16) to restore, or nil until the editor has reported one.
-    var location: Int?
 }
 
 /// Watches the open file's folder and reconciles external edits with the editor: adopts

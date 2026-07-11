@@ -21,7 +21,9 @@ enum JSRenderer {
                               markdownIt: read("markdown-it.min.js"),
                               katex: read("katex/katex.min.js"),
                               texmath: read("texmath.js"),
-                              hljs: read("hljs/highlight.min.js"))
+                              hljs: read("hljs/highlight.min.js"),
+                              anchors: read("anchors.js"),
+                              tasklists: read("tasklists.js"))
 
         return assembleDocument(body: body, web: web, read: read)
     }
@@ -29,7 +31,8 @@ enum JSRenderer {
     // MARK: JavaScriptCore render
 
     private static func renderBody(markdown: String, markdownIt: String,
-                                   katex: String, texmath: String, hljs: String) -> String {
+                                   katex: String, texmath: String, hljs: String,
+                                   anchors: String, tasklists: String) -> String {
         guard let ctx = JSContext() else { return escapedPre(markdown) }
         ctx.exceptionHandler = { _, exc in
             log.error("JS exception: \(exc?.toString() ?? "nil", privacy: .public)")
@@ -41,6 +44,8 @@ enum JSRenderer {
         ctx.evaluateScript(katex)
         ctx.evaluateScript(texmath)
         ctx.evaluateScript(hljs)
+        ctx.evaluateScript(anchors)   // defines window.glimAnchors (window === this here)
+        ctx.evaluateScript(tasklists) // defines window.glimTaskLists
         ctx.evaluateScript(#"""
         var __md = markdownit({
           html: true, linkify: true, typographer: true,
@@ -59,6 +64,8 @@ enum JSRenderer {
           delimiters: 'dollars',
           katexOptions: { throwOnError: false, strict: false, output: 'html' }
         });
+        glimAnchors(__md);   // GitHub-style heading ids so in-document #anchors resolve in Quick Look
+        glimTaskLists(__md, { interactive: false });   // static checkboxes (disabled) in Quick Look
         function __render(src){ return __md.render(src); }
         """#)
 

@@ -26,6 +26,13 @@ const md = window.markdownit({
   katexOptions: { throwOnError: false, strict: false, output: 'htmlAndMathml' }
 });
 
+// GitHub-style heading anchor ids (h1–h6), so in-document [x](#section) links resolve.
+window.glimAnchors(md);
+
+// Clickable task-list checkboxes (- [ ] / - [x]). Interactive here (app view mode);
+// Quick Look renders them disabled. See tasklists.js.
+window.glimTaskLists(md, { interactive: true });
+
 // ---- source-line mapping (for rendered<->raw scroll sync) -------------------
 // Tag every top-level block with the 0-based source line it starts on. Most
 // block tokens render through renderToken/renderAttrs, so setting the attr is
@@ -153,6 +160,24 @@ document.addEventListener('selectionchange', function () {
   glimSelTimer = setTimeout(function () { glimSelTimer = null; glimReportSelection(); }, 120);
 });
 
+// ---- task checkbox toggling ------------------------------------------------
+// A click on a rendered task checkbox reports its 0-based SOURCE line to native, which
+// flips the marker in the document text; the re-render is the source of truth (the DOM's
+// own checked state is discarded), so no preventDefault is needed. Listener lives on
+// #content so it survives re-renders.
+(function () {
+  var content = document.getElementById('content');
+  if (!content) return;
+  content.addEventListener('change', function (e) {
+    var el = e.target;
+    if (!el || el.type !== 'checkbox' || !el.hasAttribute('data-task-line')) return;
+    var line = parseInt(el.getAttribute('data-task-line'), 10);
+    if (isNaN(line)) return;
+    var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.toggleTask;
+    if (h) h.postMessage(line);
+  }, false);
+})();
+
 // ---- in-page find ----------------------------------------------------------
 window.glimCountMatches = function (q, caseSensitive) {
   if (!q) return 0;
@@ -187,6 +212,114 @@ document.addEventListener('click', function (e) {
   const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.openLink;
   if (h) h.postMessage(href);
 }, true);
+
+// ---- broken-image placeholder ----------------------------------------------
+// A local image that fails to load (missing file, unresolved path) otherwise renders
+// as nothing. Swap the broken <img> for a labelled placeholder: its alt text (or the
+// filename from src) plus a "missing image" hint. Capture phase because image error
+// events don't bubble, and the listener lives on #content so it survives re-renders.
+(function () {
+  var content = document.getElementById('content');
+  if (!content) return;
+  content.addEventListener('error', function (e) {
+    var img = e.target;
+    if (!img || img.tagName !== 'IMG' || img.dataset.glimBroken) return;
+    img.dataset.glimBroken = '1';
+    var src = img.getAttribute('src') || '';
+    var name = (src.split(/[\\/]/).pop() || '').split('?')[0] || 'image';
+    var label = (img.getAttribute('alt') || '').trim() || name;
+    var ph = document.createElement('span');
+    ph.className = 'glim-missing-image';
+    var l = document.createElement('span');
+    l.className = 'glim-missing-label';
+    l.textContent = label;
+    var h = document.createElement('span');
+    h.className = 'glim-missing-hint';
+    h.textContent = 'missing image';
+    ph.appendChild(l);
+    ph.appendChild(h);
+    if (img.parentNode) img.parentNode.replaceChild(ph, img);
+  }, true);
+})();
+
+// ---- code-block copy button (A4) -------------------------------------------
+// One floating button follows the hovered <pre>, rather than injecting a button into
+// every block (which would fight the re-render on each keystroke). Positioned in document
+// coordinates so it scrolls with the block; click copies the block's text to native.
+(function () {
+  var content = document.getElementById('content');
+  if (!content) return;
+  var btn = document.createElement('button');
+  btn.className = 'glim-copy-btn';
+  btn.type = 'button';
+  btn.textContent = 'Copy';
+  document.body.appendChild(btn);
+  var currentPre = null;
+  var resetTimer = null;
+
+  function place(pre) {
+    var r = pre.getBoundingClientRect();
+    btn.style.top = (r.top + window.scrollY + 8) + 'px';
+    btn.style.left = (r.right + window.scrollX - 8) + 'px';   // CSS translateX(-100%) right-aligns
+  }
+  function show(pre) {
+    currentPre = pre;
+    place(pre);
+    btn.classList.add('visible');
+  }
+  function hide() {
+    currentPre = null;
+    btn.classList.remove('visible');
+  }
+
+  content.addEventListener('mouseover', function (e) {
+    var pre = e.target.closest && e.target.closest('pre');
+    if (pre) show(pre);
+  });
+  content.addEventListener('mouseout', function (e) {
+    // Moving from the <pre> onto the button keeps it up; leaving both hides it.
+    if (e.relatedTarget === btn) return;
+    var pre = e.target.closest && e.target.closest('pre');
+    if (pre && (!e.relatedTarget || !pre.contains(e.relatedTarget))) hide();
+  });
+  btn.addEventListener('mouseleave', function (e) {
+    if (currentPre && e.relatedTarget && currentPre.contains(e.relatedTarget)) return;
+    hide();
+  });
+  btn.addEventListener('click', function () {
+    if (!currentPre) return;
+    var code = currentPre.querySelector('code');
+    var text = (code ? code.innerText : currentPre.innerText) || '';
+    var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.copyCode;
+    if (h) h.postMessage(text);
+    btn.textContent = 'Copied';
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = setTimeout(function () { btn.textContent = 'Copy'; }, 1000);
+  });
+})();
+
+// ---- link hover status readout (A7) ----------------------------------------
+// Report the href under the pointer to native (Safari-style status pill); "" on exit.
+// Delegated on #content so it survives re-renders.
+(function () {
+  var content = document.getElementById('content');
+  if (!content) return;
+  function post(href) {
+    var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.hoverLink;
+    if (h) h.postMessage(href || '');
+  }
+  content.addEventListener('mouseover', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (a) post(a.getAttribute('href'));
+  });
+  content.addEventListener('mouseout', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    // Only clear when the pointer actually leaves the anchor (not moving within it).
+    if (e.relatedTarget && a.contains(e.relatedTarget)) return;
+    post('');
+  });
+})();
 
 // signal native side that the page is ready
 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ready) {

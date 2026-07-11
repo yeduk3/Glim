@@ -9,6 +9,16 @@ struct QuickOpenItem: Identifiable {
     var id: URL { url }
 }
 
+/// A full-text content hit (C1): a file whose *contents* (not name) contain the query,
+/// shown in the tier below the filename matches with a one-line snippet of the match.
+struct QuickOpenContentHit: Identifiable {
+    let url: URL
+    let name: String
+    let relPath: String
+    let snippet: String   // one matching line, trimmed to ~80 chars around the hit
+    var id: URL { url }
+}
+
 /// State for the ⌘O "open file in folder" palette. Gathers the markdown files under the
 /// browsed root once on show, then fuzzy-filters them as the user types.
 final class QuickOpenController: ObservableObject {
@@ -16,25 +26,54 @@ final class QuickOpenController: ObservableObject {
     @Published var query = "" { didSet { recompute() } }
     @Published var selectedIndex = 0
     @Published private(set) var results: [QuickOpenItem] = []
+    /// Content-match tier (C1), published asynchronously below the filename results.
+    @Published private(set) var contentResults: [QuickOpenContentHit] = []
     private var files: [QuickOpenItem] = []
     /// Folder the visible palette is searching — the current tab's root for ⌘O, or a
     /// user-picked folder for ⌘⇧O. Opening a file roots the destination window here.
     private(set) var root: URL?
 
+    // Content search runs off the main thread, debounced, with a generation token so a
+    // slow search for an old query can't overwrite the results of a newer one.
+    private let searchQueue = DispatchQueue(label: "com.gyu.glim.quickopen.content", qos: .utility)
+    private var pendingSearch: DispatchWorkItem?
+    private var searchGeneration = 0
+    private static let contentMinQuery = 2       // start content search at 2+ chars
+    private static let contentHitCap = 30        // max content hits
+    private static let contentFileSizeCap = 1_000_000   // skip files larger than ~1 MB
+
+    /// Total selectable rows across both tiers — the flat index space the palette and ↑/↓
+    /// traverse.
+    var totalCount: Int { results.count + contentResults.count }
+
     func show(root: URL?) {
         self.root = root
         files = Self.gather(root: root)
+        contentResults = []
         query = ""        // didSet won't fire if already empty, so recompute explicitly below
         recompute()
         isVisible = true
     }
 
-    func hide() { isVisible = false }
+    func hide() {
+        pendingSearch?.cancel()
+        isVisible = false
+    }
 
-    /// Wrap-around move through the current results (driven by ↑/↓).
+    /// Wrap-around move through BOTH tiers (driven by ↑/↓).
     func move(_ delta: Int) {
-        guard !results.isEmpty else { return }
-        selectedIndex = (selectedIndex + delta + results.count) % results.count
+        let n = totalCount
+        guard n > 0 else { return }
+        selectedIndex = (selectedIndex + delta + n) % n
+    }
+
+    /// URL for the currently selected row, mapping the flat index onto the filename tier
+    /// then the content tier.
+    func selectedURL() -> URL? {
+        let idx = selectedIndex
+        if results.indices.contains(idx) { return results[idx].url }
+        let ci = idx - results.count
+        return contentResults.indices.contains(ci) ? contentResults[ci].url : nil
     }
 
     private func recompute() {
@@ -42,6 +81,7 @@ final class QuickOpenController: ObservableObject {
         if q.isEmpty {
             results = Array(files.prefix(100))
             selectedIndex = 0
+            scheduleContentSearch(q)
             return
         }
         var scored: [(item: QuickOpenItem, score: Int)] = []
@@ -54,6 +94,68 @@ final class QuickOpenController: ObservableObject {
         }
         results = scored.prefix(100).map { $0.item }
         selectedIndex = 0
+        scheduleContentSearch(q)
+    }
+
+    /// Debounced, cancellable full-text search (C1). Cancels any queued search, then — for a
+    /// query of 2+ chars — dispatches a fresh one after 150 ms. Each search carries a
+    /// generation number; when it finishes it only publishes if it is still the latest, so
+    /// stale results (from a query the user has since edited) are dropped. Typing never blocks:
+    /// filename results already updated synchronously above.
+    private func scheduleContentSearch(_ q: String) {
+        pendingSearch?.cancel()
+        searchGeneration &+= 1
+        let generation = searchGeneration
+        guard q.count >= Self.contentMinQuery else { contentResults = []; return }
+        let filesSnapshot = files
+        let exclude = Set(results.map { $0.url })   // don't repeat filename hits in this tier
+        let work = DispatchWorkItem { [weak self] in
+            let hits = QuickOpenController.contentSearch(query: q, files: filesSnapshot, exclude: exclude)
+            DispatchQueue.main.async {
+                guard let self, generation == self.searchGeneration else { return }
+                self.contentResults = hits
+                if self.selectedIndex >= self.totalCount { self.selectedIndex = 0 }
+            }
+        }
+        pendingSearch = work
+        searchQueue.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    /// Case-insensitive substring scan over file contents. Skips excluded (filename-tier)
+    /// files and files over the size cap; stops at the hit cap.
+    private static func contentSearch(query q: String, files: [QuickOpenItem],
+                                      exclude: Set<URL>) -> [QuickOpenContentHit] {
+        var hits: [QuickOpenContentHit] = []
+        for item in files {
+            if hits.count >= contentHitCap { break }
+            if exclude.contains(item.url) { continue }
+            if let size = try? item.url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+               size > contentFileSizeCap { continue }
+            guard let content = try? String(contentsOf: item.url, encoding: .utf8),
+                  let r = content.range(of: q, options: .caseInsensitive) else { continue }
+            hits.append(QuickOpenContentHit(url: item.url, name: item.name, relPath: item.relPath,
+                                            snippet: snippet(around: r, in: content)))
+        }
+        return hits
+    }
+
+    /// One-line snippet of the matching line, whitespace-collapsed and windowed to ~80 chars
+    /// centered on the hit (with … elision when trimmed).
+    private static func snippet(around r: Range<String.Index>, in content: String) -> String {
+        let lineRange = content.lineRange(for: r)
+        let line = content[lineRange].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.count > 80 else { return line }
+        let chars = Array(line)
+        // hit offset within the (untrimmed) line, approximated onto the trimmed line
+        let hitInLine = content.distance(from: lineRange.lowerBound, to: r.lowerBound)
+        let leadingTrim = content[lineRange].prefix(while: { $0 == " " || $0 == "\t" }).count
+        let center = max(0, min(chars.count - 1, hitInLine - leadingTrim))
+        let start = max(0, center - 40)
+        let end = min(chars.count, start + 80)
+        var out = String(chars[start..<end])
+        if start > 0 { out = "…" + out }
+        if end < chars.count { out += "…" }
+        return out
     }
 
     /// Intuitive tiered ranking (higher = better). `q` is already lowercased.
@@ -144,7 +246,7 @@ struct QuickOpenPalette: View {
 
             Divider()
 
-            if controller.results.isEmpty {
+            if controller.results.isEmpty && controller.contentResults.isEmpty {
                 Text(controller.query.isEmpty ? "Type to search files in this folder"
                                               : "No matching files")
                     .foregroundStyle(.secondary)
@@ -156,29 +258,51 @@ struct QuickOpenPalette: View {
         .frame(width: 560)
     }
 
+    /// Filename tier, then (if any) a "Content matches" header + content tier — flattened
+    /// into a single list. Every selectable row's identity IS its flat index, which is also
+    /// what selection, ↑/↓, and scrollTo use; the non-selectable header takes id -1. One
+    /// consistent identity per row (no ForEach-id + `.id()` double identity) avoids the stale-
+    /// row reuse bug the original code documented.
+    private var rows: [PaletteRow] {
+        var out: [PaletteRow] = []
+        for (i, item) in controller.results.enumerated() { out.append(.file(index: i, item: item)) }
+        if !controller.contentResults.isEmpty {
+            out.append(.header)
+            let base = controller.results.count
+            for (j, hit) in controller.contentResults.enumerated() {
+                out.append(.content(index: base + j, hit: hit))
+            }
+        }
+        return out
+    }
+
     private var resultsList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // Identify rows by INDEX (matching `.id(idx)`, selection, and scrollTo —
-                    // all index-based). Identifying the ForEach by element URL while also
-                    // pinning `.id(idx)` gave each row two conflicting identities: shrinking
-                    // the result set (39 default -> 8 "HW") made SwiftUI reuse the existing
-                    // index-0..7 views and skip updating their content, so the list kept
-                    // showing the old default rows while the model already held the filtered
-                    // 8. One consistent identity fixes it.
-                    ForEach(Array(controller.results.enumerated()), id: \.offset) { idx, item in
-                        // A plain row + tap gesture, NOT a Button: a Button is keyboard-
-                        // focusable, so arrowing (which re-renders with a new selected row)
-                        // let SwiftUI's focus engine steal first responder from the search
-                        // field — breaking typing. Plain views aren't in the focus order.
-                        QuickOpenRow(item: item, selected: idx == controller.selectedIndex)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                controller.selectedIndex = idx
-                                openSelected()
-                            }
-                            .id(idx)
+                    ForEach(rows) { row in
+                        switch row {
+                        case .header:
+                            ContentMatchesHeader()
+                        case .file(let idx, let item):
+                            // A plain row + tap gesture, NOT a Button: a Button is keyboard-
+                            // focusable, so arrowing (which re-renders with a new selected row)
+                            // let SwiftUI's focus engine steal first responder from the search
+                            // field — breaking typing. Plain views aren't in the focus order.
+                            QuickOpenRow(item: item, selected: idx == controller.selectedIndex)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    controller.selectedIndex = idx
+                                    openSelected()
+                                }
+                        case .content(let idx, let hit):
+                            QuickOpenContentRow(hit: hit, selected: idx == controller.selectedIndex)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    controller.selectedIndex = idx
+                                    openSelected()
+                                }
+                        }
                     }
                 }
                 .padding(6)
@@ -194,8 +318,38 @@ struct QuickOpenPalette: View {
     }
 
     private func openSelected() {
-        guard controller.results.indices.contains(controller.selectedIndex) else { return }
-        onOpen(controller.results[controller.selectedIndex].url)
+        guard let url = controller.selectedURL() else { return }
+        onOpen(url)
+    }
+}
+
+/// One row in the flattened two-tier palette list. Identity is the flat selection index for
+/// selectable rows (`.file` / `.content`); the section header takes -1 (never selected).
+private enum PaletteRow: Identifiable {
+    case file(index: Int, item: QuickOpenItem)
+    case header
+    case content(index: Int, hit: QuickOpenContentHit)
+
+    var id: Int {
+        switch self {
+        case .file(let i, _): return i
+        case .header: return -1
+        case .content(let i, _): return i
+        }
+    }
+}
+
+/// Quiet tier separator between filename and content matches (DESIGN.md §1.5: caption2,
+/// tertiary — the lowest hierarchy tier).
+private struct ContentMatchesHeader: View {
+    var body: some View {
+        Text("Content matches")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -352,6 +506,36 @@ private struct QuickOpenRow: View {
                         .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
                         .lineLimit(1)
                 }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? Color.accentColor : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6))
+        .foregroundStyle(selected ? Color.white : Color.primary)
+    }
+}
+
+/// A content-match row (C1): filename primary, matching-line snippet as the secondary
+/// caption. Mirrors QuickOpenRow's metrics/selection styling; a magnifying-glass icon marks
+/// it as a content hit rather than a filename hit.
+private struct QuickOpenContentRow: View {
+    let hit: QuickOpenContentHit
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.magnifyingglass")
+                .foregroundStyle(selected ? Color.white : Color.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(hit.name)
+                    .lineLimit(1)
+                Text(hit.snippet)
+                    .font(.caption)
+                    .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
+                    .lineLimit(1)
             }
             Spacer(minLength: 0)
         }

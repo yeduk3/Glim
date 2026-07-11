@@ -97,6 +97,22 @@ body.full-width #content { max-width: 100%; }
 #content tr:nth-child(2n) td { background: var(--fill); }
 
 #content img { max-width: 100%; height: auto; }
+
+/* Broken/missing local image -> labelled placeholder (built in render.js). A box is a
+   deliberate last resort here (DESIGN.md §2): it must read as absent content, not styled
+   text. Subtle fill + dashed hairline signals "nothing loaded"; label secondary, hint fainter. */
+#content .glim-missing-image {
+  display: inline-flex;
+  flex-direction: column;
+  gap: .1em;
+  padding: .5em .8em;
+  background: var(--fill);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  vertical-align: middle;
+}
+#content .glim-missing-label { color: var(--fg-2); font-size: .9em; }
+#content .glim-missing-hint  { color: var(--fg-3); font-size: .75em; }
 #content hr { height: 1px; border: 0; background: var(--border); margin: 2em 0; }
 
 #content blockquote > :last-child,
@@ -108,5 +124,41 @@ body.full-width #content { max-width: 100%; }
 .katex-display { margin: 1em 0; }
 .katex { font-size: 1.05em; }
 
-/* task lists (checkbox accent is the system default in WebKit) */
+/* task lists (checkbox accent is the system default in WebKit). The marker is replaced
+   by the checkbox, so drop the list bullet on task items. */
+#content .task-item { list-style: none; }
 #content input[type="checkbox"] { margin-right: .4em; }
+
+/* Code-block copy button (A4): one floating control that follows the hovered <pre>
+   (built in render.js). System-colored (same vars as the chrome), caption-sized, and
+   only visible while hovering the block — quiet by default (DESIGN.md §5). */
+.glim-copy-btn {
+  position: absolute;
+  transform: translateX(-100%);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--fg-2);
+  background: var(--fill);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.glim-copy-btn.visible { opacity: 1; pointer-events: auto; }
+.glim-copy-btn:hover { background: var(--fill-2); }
+
+/* Print / Export as PDF (D1): let the document use the full page, keep atomic blocks
+   from splitting across pages, and drop the interactive-only copy button. */
+@media print {
+  .glim-copy-btn { display: none !important; }
+  #content { max-width: none; margin: 0; padding: 0; }
+  #content pre, #content table, #content blockquote,
+  #content img, #content .katex-display { break-inside: avoid; }
+  #content h1, #content h2, #content h3, #content h4, #content h5, #content h6 {
+    break-after: avoid;
+  }
+}

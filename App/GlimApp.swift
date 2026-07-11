@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import MarkdownEditorKit
 
 @main
 struct GlimApp: App {
@@ -20,11 +21,18 @@ struct GlimApp: App {
                 OpenFileCommand()
                 OpenFolderCommand()
             }
+            CommandGroup(replacing: .printItem) {
+                PrintCommands()
+            }
             CommandGroup(after: .textEditing) {
                 FindCommands()
             }
+            CommandMenu("Format") {
+                FormatCommands()
+            }
             CommandGroup(after: .toolbar) {
                 ModeCommands()
+                OutlineCommand()
                 Divider()
                 FullWidthCommand()
                 Divider()
@@ -116,6 +124,28 @@ private struct FindCommands: View {
     }
 }
 
+/// Format-menu markdown shortcuts. Each sends its selector down the responder chain; the
+/// raw editor's MarkdownTextView implements them, and in view mode nothing does — so the
+/// items simply no-op. No FocusedValue gate is needed (harmless when unhandled).
+private struct FormatCommands: View {
+    var body: some View {
+        Button("Bold") {
+            NSApp.sendAction(#selector(MarkdownTextView.toggleMarkdownBold(_:)), to: nil, from: nil)
+        }
+        .keyboardShortcut("b", modifiers: .command)
+
+        Button("Italic") {
+            NSApp.sendAction(#selector(MarkdownTextView.toggleMarkdownItalic(_:)), to: nil, from: nil)
+        }
+        .keyboardShortcut("i", modifiers: .command)
+
+        Button("Add Link…") {
+            NSApp.sendAction(#selector(MarkdownTextView.insertMarkdownLink(_:)), to: nil, from: nil)
+        }
+        .keyboardShortcut("k", modifiers: .command)
+    }
+}
+
 /// View-menu items wired to the focused window's mode / sidebar bindings.
 private struct ModeCommands: View {
     @FocusedBinding(\.editorMode) private var mode: EditorMode?
@@ -138,6 +168,36 @@ private struct ModeCommands: View {
         Button("Focus Sidebar") { focusSidebar?() }
             .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(focusSidebar == nil)
+    }
+}
+
+/// File-menu Print… (⌘P) and Export as PDF… (⌥⌘E), driving the focused window's rendered
+/// web view (D1). Both are disabled in edit mode (their action is nil then), because they
+/// print/export the RENDERED document and the live web view exists only in view mode — the
+/// robust choice over trying to render offscreen or switch mode then print.
+private struct PrintCommands: View {
+    @FocusedValue(\.printAction) private var printAction: (() -> Void)?
+    @FocusedValue(\.exportPDFAction) private var exportAction: (() -> Void)?
+
+    var body: some View {
+        Button("Print…") { printAction?() }
+            .keyboardShortcut("p", modifiers: .command)
+            .disabled(printAction == nil)
+        Button("Export as PDF…") { exportAction?() }
+            .keyboardShortcut("e", modifiers: [.command, .option])
+            .disabled(exportAction == nil)
+    }
+}
+
+/// View-menu outline-panel toggle (A2). App-global like Full Width (persisted per-app, shared
+/// across tabs), so it observes the shared object directly rather than a per-window FocusedValue.
+private struct OutlineCommand: View {
+    @ObservedObject private var outline = OutlineVisibility.shared
+
+    var body: some View {
+        Toggle("Show Outline", isOn: Binding(get: { outline.isVisible },
+                                             set: { _ in outline.toggle() }))
+            .keyboardShortcut("1", modifiers: [.control, .command])
     }
 }
 
@@ -175,6 +235,8 @@ private struct EditorModeKey: FocusedValueKey { typealias Value = Binding<Editor
 private struct SidebarVisibleKey: FocusedValueKey { typealias Value = Binding<Bool> }
 private struct NewFileActionKey: FocusedValueKey { typealias Value = () -> Void }
 private struct FocusSidebarActionKey: FocusedValueKey { typealias Value = () -> Void }
+private struct PrintActionKey: FocusedValueKey { typealias Value = () -> Void }
+private struct ExportPDFActionKey: FocusedValueKey { typealias Value = () -> Void }
 
 extension FocusedValues {
     var editorMode: Binding<EditorMode>? {
@@ -192,5 +254,13 @@ extension FocusedValues {
     var focusSidebarAction: (() -> Void)? {
         get { self[FocusSidebarActionKey.self] }
         set { self[FocusSidebarActionKey.self] = newValue }
+    }
+    var printAction: (() -> Void)? {
+        get { self[PrintActionKey.self] }
+        set { self[PrintActionKey.self] = newValue }
+    }
+    var exportPDFAction: (() -> Void)? {
+        get { self[ExportPDFActionKey.self] }
+        set { self[ExportPDFActionKey.self] = newValue }
     }
 }

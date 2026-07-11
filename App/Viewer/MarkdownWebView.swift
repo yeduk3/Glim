@@ -1,5 +1,13 @@
 import SwiftUI
 import WebKit
+import MarkdownEditorKit
+
+/// Hands ContentView a reference to the live rendered WKWebView so File-menu Print /
+/// Export-as-PDF (D1) can drive it. Weak so the web view's lifetime stays owned by the
+/// NSViewRepresentable, not this handle.
+final class ViewerHandle: ObservableObject {
+    weak var webView: WKWebView?
+}
 
 struct MarkdownWebView: NSViewRepresentable {
     var markdown: String
@@ -20,6 +28,15 @@ struct MarkdownWebView: NSViewRepresentable {
     /// Opens a markdown file in Glim (in-document link to another .md). Non-markdown links
     /// and external (http/mailto) links are handed to the system instead.
     var onOpenFile: (URL) -> Void = { _ in }
+    /// A rendered task checkbox was clicked; carries its 0-based source line to toggle (A3).
+    var onToggleTask: (Int) -> Void = { _ in }
+    /// Reports the href under the pointer for the link-hover status readout (A7); "" on exit.
+    var onHoverLink: (String) -> Void = { _ in }
+    /// Outline-panel jump (A2): a bumped `jumpToken` scrolls the view to `jumpLine`.
+    var jumpToken: Int = 0
+    var jumpLine: Int?
+    /// Exposes the live web view to the app for Print / Export-as-PDF (D1).
+    var viewerHandle: ViewerHandle?
 
     func makeCoordinator() -> Coordinator { Coordinator(sync: sync, selection: selection) }
 
@@ -29,16 +46,23 @@ struct MarkdownWebView: NSViewRepresentable {
         config.userContentController.add(context.coordinator, name: "scroll")
         config.userContentController.add(context.coordinator, name: "selection")
         config.userContentController.add(context.coordinator, name: "openLink")
+        config.userContentController.add(context.coordinator, name: "toggleTask")
+        config.userContentController.add(context.coordinator, name: "hoverLink")
+        config.userContentController.add(context.coordinator, name: "copyCode")
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground") // let CSS paint bg, avoid white flash
         context.coordinator.webView = webView
         context.coordinator.pendingLine = initialLine
         context.coordinator.lastFocusPulse = focusPulse
+        context.coordinator.lastJumpToken = jumpToken
         context.coordinator.fontScale = fontScale
         context.coordinator.fullWidth = fullWidth
         context.coordinator.docDirectory = docDirectory
         context.coordinator.onOpenFile = onOpenFile
+        context.coordinator.onToggleTask = onToggleTask
+        context.coordinator.onHoverLink = onHoverLink
+        viewerHandle?.webView = webView
 
         if let index = WebResources.indexURL(), let dir = WebResources.directory() {
             webView.loadFileURL(index, allowingReadAccessTo: dir)
@@ -49,6 +73,9 @@ struct MarkdownWebView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.docDirectory = docDirectory
         context.coordinator.onOpenFile = onOpenFile
+        context.coordinator.onToggleTask = onToggleTask
+        context.coordinator.onHoverLink = onHoverLink
+        viewerHandle?.webView = webView
         context.coordinator.render(markdown)
         context.coordinator.applyFontScale(fontScale)
         context.coordinator.applyFullWidth(fullWidth)
@@ -56,6 +83,12 @@ struct MarkdownWebView: NSViewRepresentable {
         if focusPulse != context.coordinator.lastFocusPulse {
             context.coordinator.lastFocusPulse = focusPulse
             DispatchQueue.main.async { webView.window?.makeFirstResponder(webView) }
+        }
+        if jumpToken != context.coordinator.lastJumpToken {
+            context.coordinator.lastJumpToken = jumpToken
+            if let line = jumpLine {
+                context.coordinator.scrollToLine(line)
+            }
         }
     }
 
@@ -71,10 +104,17 @@ struct MarkdownWebView: NSViewRepresentable {
         var lastFocusPulse = 0
         var docDirectory: URL?
         var onOpenFile: (URL) -> Void = { _ in }
+        var onToggleTask: (Int) -> Void = { _ in }
+        var onHoverLink: (String) -> Void = { _ in }
+        var lastJumpToken = 0
         var fontScale: Double = 1
         private var appliedFontScale: Double = .nan
         var fullWidth = false
         private var appliedFullWidth: Bool?
+
+        // Embedded-image cache: resolved absolute path -> (mtime, size, data URI). Lets an
+        // unchanged image skip re-reading + re-encoding on every render (every keystroke).
+        private var embedCache: [String: (mtime: Date, size: Int, uri: String)] = [:]
 
         // find de-dup
         private var lastVisible = false
@@ -98,25 +138,69 @@ struct MarkdownWebView: NSViewRepresentable {
         }
 
         // WKWebView sandbox only allows reading from the bundle's web/ dir (allowingReadAccessTo).
-        // Resolve relative image paths to base64 data URIs so local images render.
+        // Resolve local image paths — both markdown ![alt](path) and raw HTML <img src="path"> —
+        // to base64 data URIs so local images render. http/https/data:/file: are left untouched;
+        // a missing file keeps its original src (the render.js placeholder then shows the gap).
         private func embedLocalImages(_ md: String, in dir: URL) -> String {
-            guard let re = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)]+)\)"#) else { return md }
-            let ns = md as NSString
-            let matches = re.matches(in: md, range: NSRange(location: 0, length: ns.length))
             var result = md
-            for m in matches.reversed() {
-                let path = ns.substring(with: m.range(at: 2))
-                guard !path.hasPrefix("http"), !path.hasPrefix("data:"), !path.hasPrefix("file:") else { continue }
-                let fileURL = dir.appendingPathComponent(path)
-                guard let data = try? Data(contentsOf: fileURL) else { continue }
-                let ext = fileURL.pathExtension.lowercased()
-                let mime = ["jpeg": "image/jpeg", "jpg": "image/jpeg", "gif": "image/gif",
-                            "svg": "image/svg+xml", "webp": "image/webp"][ext] ?? "image/png"
-                let alt = ns.substring(with: m.range(at: 1))
-                let replacement = "![\(alt)](data:\(mime);base64,\(data.base64EncodedString()))"
-                result.replaceSubrange(Range(m.range(at: 0), in: result)!, with: replacement)
+            var referenced = Set<String>()   // resolved paths used this render, for cache pruning
+
+            // 1) Markdown images: ![alt](path) -> ![alt](data:…)
+            if let re = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)]+)\)"#) {
+                let ns = result as NSString
+                for m in re.matches(in: result, range: NSRange(location: 0, length: ns.length)).reversed() {
+                    let path = ns.substring(with: m.range(at: 2))
+                    guard let fileURL = resolveImagePath(path, in: dir),
+                          let uri = dataURI(for: fileURL, referenced: &referenced) else { continue }
+                    let alt = ns.substring(with: m.range(at: 1))
+                    result.replaceSubrange(Range(m.range(at: 0), in: result)!, with: "![\(alt)](\(uri))")
+                }
             }
+
+            // 2) Raw HTML images: rewrite only the src="…"/src='…' value in place.
+            if let re = try? NSRegularExpression(pattern: #"<img\b[^>]*?\bsrc\s*=\s*(["'])(.*?)\1"#,
+                                                 options: [.caseInsensitive]) {
+                let ns = result as NSString
+                for m in re.matches(in: result, range: NSRange(location: 0, length: ns.length)).reversed() {
+                    let path = ns.substring(with: m.range(at: 2))
+                    guard let fileURL = resolveImagePath(path, in: dir),
+                          let uri = dataURI(for: fileURL, referenced: &referenced) else { continue }
+                    result.replaceSubrange(Range(m.range(at: 2), in: result)!, with: uri)
+                }
+            }
+
+            // Drop cache entries not referenced this render so it can't grow unbounded.
+            embedCache = embedCache.filter { referenced.contains($0.key) }
             return result
+        }
+
+        /// Resolve a document image path to an absolute file URL, or nil if it's a remote/
+        /// already-embedded reference we must leave alone. Absolute paths pass through; relative
+        /// paths resolve against the document folder.
+        private func resolveImagePath(_ path: String, in dir: URL) -> URL? {
+            let p = path.trimmingCharacters(in: .whitespaces)
+            guard !p.isEmpty, !p.hasPrefix("http"), !p.hasPrefix("data:"), !p.hasPrefix("file:")
+            else { return nil }
+            return p.hasPrefix("/") ? URL(fileURLWithPath: p) : dir.appendingPathComponent(p)
+        }
+
+        /// Base64 data URI for `fileURL`, served from the cache when the file's mtime+size are
+        /// unchanged. Records the key in `referenced` (for pruning). nil if missing/unreadable.
+        private func dataURI(for fileURL: URL, referenced: inout Set<String>) -> String? {
+            let key = fileURL.standardizedFileURL.path
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: key),
+                  let mtime = attrs[.modificationDate] as? Date,
+                  let size = attrs[.size] as? Int else { return nil }   // missing -> leave original src
+            referenced.insert(key)
+            if let c = embedCache[key], c.mtime == mtime, c.size == size { return c.uri }
+            // ponytail: first encode still sync on main; move to a background queue if large-image docs stutter
+            guard let data = try? Data(contentsOf: fileURL) else { return nil }
+            let ext = fileURL.pathExtension.lowercased()
+            let mime = ["jpeg": "image/jpeg", "jpg": "image/jpeg", "gif": "image/gif",
+                        "svg": "image/svg+xml", "webp": "image/webp"][ext] ?? "image/png"
+            let uri = "data:\(mime);base64,\(data.base64EncodedString())"
+            embedCache[key] = (mtime, size, uri)
+            return uri
         }
 
         /// Push the current zoom into the page (no-op until ready, and de-duped so a
@@ -126,6 +210,12 @@ struct MarkdownWebView: NSViewRepresentable {
             guard ready, scale != appliedFontScale else { return }
             appliedFontScale = scale
             webView?.evaluateJavaScript("window.glimSetFontScale(\(scale));", completionHandler: nil)
+        }
+
+        /// Scroll the rendered view so 0-based source `line` sits at the top (outline jump, A2).
+        func scrollToLine(_ line: Int) {
+            guard ready else { pendingLine = line; return }
+            webView?.evaluateJavaScript("window.glimScrollToLine(\(line));", completionHandler: nil)
         }
 
         /// Push the full-width state into the page (no-op until ready, de-duped).
@@ -210,6 +300,16 @@ struct MarkdownWebView: NSViewRepresentable {
                 selection.report(max(0, n))
             case "openLink":
                 if let href = message.body as? String { openLink(href) }
+            case "toggleTask":
+                let line = (message.body as? Int) ?? Int((message.body as? Double) ?? 0)
+                onToggleTask(line)
+            case "hoverLink":
+                onHoverLink((message.body as? String) ?? "")
+            case "copyCode":
+                if let code = message.body as? String {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(code, forType: .string)
+                }
             default:
                 break
             }

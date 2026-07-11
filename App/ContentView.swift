@@ -1,5 +1,8 @@
 import SwiftUI
 import AppKit
+import WebKit
+import UniformTypeIdentifiers
+import MarkdownEditorKit
 
 struct ContentView: View {
     @Binding var document: MarkdownDocument
@@ -19,7 +22,10 @@ struct ContentView: View {
     @State private var browsingRoot: URL?
     @ObservedObject private var sidebarVis = SidebarVisibility.shared
     @StateObject private var find = FindController()
-    @StateObject private var sync = ScrollSync()
+    // @State, NOT @StateObject: sync.line publishes on every scroll tick, and ContentView
+    // must not re-render for that (only OutlineInspector observes it, for the current-
+    // section highlight). ContentView merely *reads* sync.target() during mode switches.
+    @State private var sync = ScrollSync()
     @StateObject private var tree = FileTreeModel()
     @StateObject private var sidebar = SidebarController()
     @StateObject private var detailFocus = DetailFocusController()
@@ -27,8 +33,15 @@ struct ContentView: View {
     @StateObject private var quickOpen = QuickOpenController()
     @StateObject private var fileSync = FileSync()
     @StateObject private var editCursor = EditCursorStore()
+    @StateObject private var editBuffer = EditorBuffer()
     @ObservedObject private var fontScale = FontScale.shared
     @ObservedObject private var fullWidth = FullWidthMode.shared
+    @ObservedObject private var outlineVis = OutlineVisibility.shared
+    @StateObject private var viewerHandle = ViewerHandle()
+    @State private var hoveredLink = ""
+    // Outline-panel jump (A2): a bumped token carries the target source line to the active mode.
+    @State private var outlineJumpToken = 0
+    @State private var outlineJumpLine: Int?
     @Environment(\.openDocument) private var openDocument
 
     private var sidebarVisible: Binding<Bool> {
@@ -52,6 +65,13 @@ struct ContentView: View {
         } detail: {
             detail
                 .toolbar { toolbarContent }
+                .inspector(isPresented: $outlineVis.isVisible) {
+                    OutlineInspector(text: document.text, sync: sync) { line in
+                        outlineJumpLine = line
+                        outlineJumpToken &+= 1
+                    }
+                    .inspectorColumnWidth(min: 180, ideal: 220, max: 360)
+                }
         }
         .sheet(isPresented: Binding(get: { quickOpen.isVisible },
                                     set: { if !$0 { quickOpen.hide() } })) {
@@ -64,12 +84,17 @@ struct ContentView: View {
         .focusedSceneValue(\.focusSidebarAction, focusSidebar)
         .focusedSceneValue(\.quickOpenAction, { quickOpen.show(root: browsingRoot) })
         .focusedSceneValue(\.openFolderAction, openOtherFolder)
+        // Print / Export are wired only in view mode (they drive the rendered web view); in
+        // edit mode the action is nil, which disables the File-menu items (D1).
+        .focusedSceneValue(\.printAction, mode == .view ? printDocument : nil)
+        .focusedSceneValue(\.exportPDFAction, mode == .view ? exportPDF : nil)
         .background(WindowAccessor(rootKey: browsingRoot?.standardizedFileURL.path ?? "none"))
         // Toggling to the rendered view focuses it so arrow keys scroll immediately.
         // (The raw editor self-focuses on entry.) Only fires on an actual ⌘E toggle,
         // not on a fresh tab/Space-preview where mode starts at .view.
         .onChange(of: mode) { _, m in
             selection.clear()   // stale count from the outgoing view shouldn't linger
+            hoveredLink = ""    // the link-hover pill belongs to the rendered view only
             if m == .view { detailFocus.focus() }
         }
         // A sidebar-initiated open can land in this tab (new or already-open); claim
@@ -135,6 +160,82 @@ struct ContentView: View {
     /// Opens a markdown file in Glim from an in-document link, rooted at this tab's folder.
     private func openInApp(_ url: URL) { open(url, rootedAt: browsingRoot) }
 
+    // MARK: - Task checkboxes (A3)
+
+    /// A rendered task checkbox was clicked: flip its marker on the given source line. The
+    /// binding change re-renders the view (scroll preserved by renderMarkdown's ratio keep).
+    private func toggleTask(_ line: Int) {
+        if let updated = TaskList.toggleLine(in: document.text, line: line) {
+            document.text = updated
+        }
+    }
+
+    // MARK: - Image paste & drop policy (B4)
+
+    /// Assets live in `<docDir>/assets/`; pasted bitmaps are named `<docBasename>-<stamp>.png`
+    /// (‑2, ‑3 on collision) and dropped/pasted image files are referenced relatively (copied
+    /// into assets/ if they live outside the document folder). Returns nil when there's no
+    /// on-disk document folder yet (untitled) — image insertion is simply unavailable then.
+    private func makeImagePolicy() -> ImagePolicy? {
+        guard let docDir = fileURL?.deletingLastPathComponent() else { return nil }
+        let basename = fileURL?.deletingPathExtension().lastPathComponent ?? "image"
+        return ImagePolicy(
+            saveImageData: { data, ext in
+                saveImageData(data, ext: ext, docDir: docDir, basename: basename)
+            },
+            resolveImageFile: { url in
+                resolveImageFile(url, docDir: docDir)
+            }
+        )
+    }
+
+    /// Write pasted bitmap bytes to `assets/<basename>-<stamp>.<ext>` and return the
+    /// markdown-safe relative path, or nil on write failure.
+    private func saveImageData(_ data: Data, ext: String, docDir: URL, basename: String) -> String? {
+        let assets = ensureAssets(docDir)
+        let stamp = Self.stampFormatter.string(from: Date())
+        let name = ImagePolicy.uniqueName(base: "\(basename)-\(stamp)", ext: ext) {
+            FileManager.default.fileExists(atPath: assets.appendingPathComponent($0).path)
+        }
+        let dest = assets.appendingPathComponent(name)
+        guard (try? data.write(to: dest)) != nil else { return nil }
+        return ImagePolicy.encodeForMarkdown("assets/\(name)")
+    }
+
+    /// Resolve a dropped/pasted image FILE to a markdown-safe path: relative if it already
+    /// lives under the document folder, otherwise copied into assets/ first. nil on failure.
+    private func resolveImageFile(_ url: URL, docDir: URL) -> String? {
+        let std = url.standardizedFileURL
+        let dir = docDir.standardizedFileURL
+        let dirPath = dir.path.hasSuffix("/") ? dir.path : dir.path + "/"
+        if std.path.hasPrefix(dirPath) {
+            let rel = String(std.path.dropFirst(dirPath.count))
+            return ImagePolicy.encodeForMarkdown(rel)
+        }
+        let assets = ensureAssets(docDir)
+        let ext = std.pathExtension.isEmpty ? "png" : std.pathExtension
+        let name = ImagePolicy.uniqueName(base: std.deletingPathExtension().lastPathComponent, ext: ext) {
+            FileManager.default.fileExists(atPath: assets.appendingPathComponent($0).path)
+        }
+        let dest = assets.appendingPathComponent(name)
+        guard (try? FileManager.default.copyItem(at: std, to: dest)) != nil else { return nil }
+        return ImagePolicy.encodeForMarkdown("assets/\(name)")
+    }
+
+    /// `<docDir>/assets/`, created on demand.
+    private func ensureAssets(_ docDir: URL) -> URL {
+        let assets = docDir.appendingPathComponent("assets", isDirectory: true)
+        try? FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        return assets
+    }
+
+    private static let stampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        return f
+    }()
+
     /// Opens a markdown file in Glim as a tab in `root`'s window group, reusing the current
     /// tab if it's already that file. Files sharing `root` tab together; a different root
     /// opens its own window (see WindowAccessor.rootKey).
@@ -166,13 +267,15 @@ struct ContentView: View {
                 Divider()
             }
             if find.isVisible {
-                FindBar(find: find)
+                FindBar(find: find, canReplace: mode == .edit)
                 Divider()
             }
             modeView
-            if selection.count > 0 {
+            // Edit mode: the readout is always visible (word/char count — iA/Ulysses
+            // convention). View mode: only while something is selected.
+            if mode == .edit || selection.count > 0 {
                 Divider()
-                SelectionCountBar(count: selection.count)
+                SelectionCountBar(mode: mode, text: document.text, selectedCount: selection.count)
             }
         }
     }
@@ -183,13 +286,33 @@ struct ContentView: View {
             MarkdownWebView(markdown: document.text, find: find, sync: sync,
                             initialLine: sync.target(for: .view), focusPulse: detailFocus.pulse,
                             fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth, selection: selection,
-                            docDirectory: fileURL?.deletingLastPathComponent(), onOpenFile: openInApp)
+                            docDirectory: fileURL?.deletingLastPathComponent(), onOpenFile: openInApp,
+                            onToggleTask: toggleTask,
+                            onHoverLink: { hoveredLink = $0 },
+                            jumpToken: outlineJumpToken, jumpLine: outlineJumpLine,
+                            viewerHandle: viewerHandle)
                 .ignoresSafeArea(edges: .bottom)
+                .overlay(alignment: .bottomLeading) {
+                    if !hoveredLink.isEmpty { LinkHoverPill(href: hoveredLink) }
+                }
         case .edit:
-            MarkdownEditor(text: $document.text, find: find, sync: sync,
-                           initialLine: sync.target(for: .edit), focusPulse: detailFocus.pulse,
-                           fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth, selection: selection,
-                           cursor: editCursor)
+            MarkdownSourceEditor(
+                text: $document.text,
+                config: EditorConfig(fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth),
+                find: find,
+                initialLine: sync.target(for: .edit),
+                focusPulse: detailFocus.pulse,
+                cursor: editCursor,
+                buffer: editBuffer,
+                imagePolicy: makeImagePolicy(),
+                jumpRequest: outlineJumpLine.map { (outlineJumpToken, $0) },
+                onEvent: { event in
+                    switch event {
+                    case .scrolled(let topLine): sync.report(line: topLine, from: .edit)
+                    case .selection(let count): selection.report(count)
+                    }
+                }
+            )
         }
     }
 
@@ -215,6 +338,50 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .help("Toggle View / Edit  (⌘E)")
         }
+        // Share the document file itself (D1). ShareLink renders as a native toolbar share
+        // button; hidden for an untitled (no-URL) document.
+        if let fileURL {
+            ToolbarItem(placement: .primaryAction) {
+                ShareLink(item: fileURL) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .help("Share")
+            }
+        }
+    }
+
+    // MARK: - Print / Export PDF (D1)
+
+    /// Print the RENDERED document. Only reachable in view mode (the menu item is disabled in
+    /// edit mode), so the live rendered web view is always present — no fragile render-then-print.
+    private func printDocument() {
+        guard let webView = viewerHandle.webView, let window = webView.window else { return }
+        guard let info = NSPrintInfo.shared.copy() as? NSPrintInfo else { return }
+        info.horizontalPagination = .fit           // scale to page width, never clip
+        info.verticalPagination = .automatic       // paginate long documents
+        info.isHorizontallyCentered = false
+        let op = webView.printOperation(with: info)
+        op.showsPrintPanel = true
+        op.showsProgressPanel = true
+        op.view?.frame = webView.bounds
+        op.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// Export the rendered document to PDF via a save panel (default name = doc basename.pdf).
+    /// View-mode only, matching Print.
+    private func exportPDF() {
+        guard let webView = viewerHandle.webView else { return }
+        webView.createPDF(configuration: WKPDFConfiguration()) { result in
+            guard case .success(let data) = result else { return }
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.pdf]
+            panel.nameFieldStringValue =
+                (fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled") + ".pdf"
+            panel.begin { resp in
+                guard resp == .OK, let url = panel.url else { return }
+                try? data.write(to: url)
+            }
+        }
     }
 }
 
@@ -238,20 +405,109 @@ private struct ExternalChangeBar: View {
     }
 }
 
-/// Small trailing readout of how many characters the current selection spans.
-/// Shown only while something is selected (count > 0).
+/// Trailing readout at the bottom of the detail view (B8). In edit mode it's always
+/// visible and shows the whole-document word + character count (iA/Ulysses convention),
+/// appending the selected-character count when there's a selection. In view mode it keeps
+/// the original behavior: shown only while selecting, characters only.
 private struct SelectionCountBar: View {
-    let count: Int
+    let mode: EditorMode
+    let text: String
+    let selectedCount: Int
     var body: some View {
         HStack {
             Spacer()
-            Text("\(count) character\(count == 1 ? "" : "s") selected")
+            Text(readout)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(.bar)
+    }
+
+    private var readout: String {
+        guard mode == .edit else {
+            return "\(selectedCount) character\(selectedCount == 1 ? "" : "s") selected"
+        }
+        let words = text.split(whereSeparator: { $0.isWhitespace }).count   // non-empty tokens
+        let chars = text.count
+        var s = "\(words) word\(words == 1 ? "" : "s") · \(chars) character\(chars == 1 ? "" : "s")"
+        if selectedCount > 0 { s += " · \(selectedCount) selected" }
+        return s
+    }
+}
+
+/// Outline inspector (A2): the document's headings, indented by level, with the current
+/// section (last heading at or above the top-visible source line) highlighted. Clicking a
+/// row asks the host to jump the active mode's view to that source line. Observes ScrollSync
+/// so the highlight tracks scrolling. Styling stays sidebar-quiet per DESIGN.md §5.
+private struct OutlineInspector: View {
+    let text: String
+    @ObservedObject var sync: ScrollSync
+    let onJump: (Int) -> Void
+
+    var body: some View {
+        let headings = Outline.headings(in: text)
+        let currentLine = headings.last(where: { $0.line <= sync.line })?.line
+        Group {
+            if headings.isEmpty {
+                VStack {
+                    Text("No headings")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(Array(headings.enumerated()), id: \.offset) { _, h in
+                        OutlineRow(level: h.level, title: h.title,
+                                   isCurrent: h.line == currentLine) { onJump(h.line) }
+                    }
+                }
+                .listStyle(.sidebar)
+            }
+        }
+    }
+}
+
+private struct OutlineRow: View {
+    let level: Int
+    let title: String
+    let isCurrent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title.isEmpty ? "Untitled" : title)
+                .font(level >= 4 ? .caption : .callout)
+                .fontWeight(isCurrent ? .semibold : .regular)
+                .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                .lineLimit(1)
+                .padding(.leading, CGFloat(level - 1) * 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Safari-style link-hover status pill (A7): the href under the pointer, bottom-leading over
+/// the rendered view. Non-interactive so it never intercepts clicks. Shown only when non-empty.
+private struct LinkHoverPill: View {
+    let href: String
+    var body: some View {
+        Text(href)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.bar, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+            .padding(8)
+            .allowsHitTesting(false)
     }
 }
 

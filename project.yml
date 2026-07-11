@@ -16,6 +16,9 @@ settings:
     DEVELOPMENT_TEAM: ""
     PRODUCT_NAME: "$(TARGET_NAME)"
     ENABLE_HARDENED_RUNTIME: "NO"
+packages:
+  MarkdownEditorKit:
+    path: ../MarkdownEditorKit
 targets:
   Glim:
     type: application
@@ -45,6 +48,7 @@ targets:
     dependencies:
       - target: QuickLookExtension
         embed: true
+      - package: MarkdownEditorKit
   QuickLookExtension:
     type: app-extension
     platform: macOS

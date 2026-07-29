@@ -98,6 +98,10 @@ It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads t
 | Open file as tab | Click a Markdown file in the sidebar (same folder ⇒ tab) |
 | Next / previous tab | `⌘⌥→` / `⌘⌥←` |
 | Jump to tab _n_ | `⌘1` … `⌘9` |
+| Open line below / above in raw editor | `⌘↩` / `⇧⌘↩` |
+| Move / duplicate raw-editor lines | `⌥↑` `⌥↓` / `⌥⇧↑` `⌥⇧↓` |
+| Delete raw-editor line(s) | `⇧⌘K` |
+| Toggle HTML comments in raw editor | `⌘/` |
 | Quick Look preview | Select a `.md` in Finder, press <kbd>space</kbd> |
 
 ### Make Glim the default Markdown app

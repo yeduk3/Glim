@@ -413,6 +413,8 @@ private struct SelectionCountBar: View {
     let mode: EditorMode
     let text: String
     let selectedCount: Int
+    @State private var counts: DocumentCounts?
+
     var body: some View {
         HStack {
             Spacer()
@@ -424,17 +426,40 @@ private struct SelectionCountBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(.bar)
+        // Counting every Character in the document used to run synchronously during each
+        // SwiftUI update. That work is especially visible when an IME commits a Hangul
+        // syllable. Keep the same readout, but coalesce typing bursts and count off-main.
+        .task(id: text) {
+            guard mode == .edit else { return }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            let snapshot = text
+            let updated = await Task.detached(priority: .utility) {
+                DocumentCounts(
+                    words: snapshot.split(whereSeparator: { $0.isWhitespace }).count,
+                    characters: snapshot.count
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            counts = updated
+        }
     }
 
     private var readout: String {
         guard mode == .edit else {
             return "\(selectedCount) character\(selectedCount == 1 ? "" : "s") selected"
         }
-        let words = text.split(whereSeparator: { $0.isWhitespace }).count   // non-empty tokens
-        let chars = text.count
+        guard let counts else { return "Counting…" }
+        let words = counts.words
+        let chars = counts.characters
         var s = "\(words) word\(words == 1 ? "" : "s") · \(chars) character\(chars == 1 ? "" : "s")"
         if selectedCount > 0 { s += " · \(selectedCount) selected" }
         return s
+    }
+
+    private struct DocumentCounts: Sendable {
+        let words: Int
+        let characters: Int
     }
 }
 

@@ -132,9 +132,20 @@ spctl -a -vvv -t exec /Applications/Glim.app 2>&1 | sed -n '1,3p' || true
 # publishes the host app to Launch Services but doesn't make pkd register the bundled
 # app-extension — that only happened after the user first opened the app (opening a
 # folder), which is why QL looked dead in fresh folders until then. Nudge pluginkit to
-# adopt the appex now, then reset the Quick Look daemon + cache so it picks up the new
-# generator immediately (install.sh already did the qlmanage reset; ship.sh didn't).
-pluginkit -a "/Applications/Glim.app/Contents/PlugIns/QuickLookExtension.appex" 2>/dev/null || true
+# adopt the appex now, verify that it is actually registered, then reset the Quick Look
+# daemon + cache so it picks up the new generator immediately.
+QL_PLUGIN="/Applications/Glim.app/Contents/PlugIns/QuickLookExtension.appex"
+pluginkit -a "$QL_PLUGIN" || die "could not register Quick Look extension"
+QL_REGISTERED=0
+for _ in 1 2 3 4 5; do
+  if pluginkit -m -v -p com.apple.quicklook.preview 2>/dev/null \
+    | grep -Fq "com.gyu.glim.QuickLookExtension"; then
+    QL_REGISTERED=1
+    break
+  fi
+  sleep 1
+done
+[ "$QL_REGISTERED" -eq 1 ] || die "Quick Look extension did not appear in plug-in registration"
 qlmanage -r >/dev/null 2>&1 || true
 qlmanage -r cache >/dev/null 2>&1 || true
 

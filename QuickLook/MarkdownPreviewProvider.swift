@@ -7,12 +7,8 @@ import os
 /// `QLIsDataBasedPreview` in Info.plist). Renders to static HTML in-process with
 /// JavaScriptCore and hands it to Quick Look's own HTML renderer — no WKWebView /
 /// WebContent (which cannot spawn in the QL preview sandbox).
-class MarkdownPreviewProvider: NSViewController, QLPreviewingController {
+class MarkdownPreviewProvider: QLPreviewProvider, QLPreviewingController {
     private static let log = Logger(subsystem: "com.gyu.glim.ql", category: "provider")
-
-    override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-    }
 
     func providePreview(for request: QLFilePreviewRequest) async throws -> QLPreviewReply {
         let url = request.fileURL

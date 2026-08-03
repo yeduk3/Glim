@@ -6,7 +6,7 @@
 
 **A minimal, native macOS Markdown editor.**
 
-Two modes — clean **View** and raw **Edit**. Folder sidebar, offline **LaTeX**, and **Quick Look** previews from Finder.
+Write in a document-like **WYSIWYG Edit** surface, or switch to clean **Preview** when you want to read and print. Exact Markdown remains available in **Source**. Folder sidebar, offline **LaTeX**, and **Quick Look** previews from Finder.
 
 [![release](https://img.shields.io/github/v/release/yeduk3/Glim)](https://github.com/yeduk3/Glim/releases/latest)
 ![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
@@ -21,11 +21,11 @@ Two modes — clean **View** and raw **Edit**. Folder sidebar, offline **LaTeX**
 
 ---
 
-## View / Edit
+## WYSIWYG Edit / Preview
 
-Toggle with `⌘E` — *View* renders KaTeX math, tables, and highlighted code; *Edit* is the raw source with linting. The sidebar shows the file's folder, and same-folder files open as tabs.
+Toggle with `⌘E` — *WYSIWYG Edit* is the default writing surface: headings, emphasis, links, quotes, lists, tasks, code, and local images are presented as a document while the original Markdown stays intact. *Preview* renders KaTeX math, tables, and highlighted code. *Source* is the deliberate escape hatch for exact Markdown and source-editor shortcuts. The sidebar shows the file's folder, and same-folder files open as tabs.
 
-| View | Edit |
+| Preview | WYSIWYG Edit |
 | :---: | :---: |
 | <img src="assets/screenshot-view.png" alt="View mode"> | <img src="assets/screenshot-edit.png" alt="Edit mode"> |
 
@@ -34,7 +34,8 @@ Toggle with `⌘E` — *View* renders KaTeX math, tables, and highlighted code; 
 ## Features
 
 - 🪶 **Native & minimal** — SwiftUI app, no Electron. Set it as your default `.md` app in Finder.
-- 👁️ **View / Edit** — switch with a single toggle (`⌘E`). View renders cleanly; Edit is raw text with lightweight Markdown linting.
+- 👁️ **Preview / WYSIWYG Edit** — switch with a single toggle (`⌘E`). WYSIWYG Edit is the primary writing surface; Source remains available when exact syntax matters.
+- ✨ **WYSIWYG editing** — inspired by [Edmund](https://github.com/I7T5/Edmund): Markdown delimiters recede, headings, emphasis, code, links, quotes, lists, and task checks gain visual hierarchy, and local images appear in place while the source stays lossless. Typewriter mode centers the current paragraph.
 - 📐 **LaTeX math** — inline `$E=mc^2$` and display `$$…$$`, rendered offline with [KaTeX](https://katex.org). No network, ever.
 - 🗂 **Folder sidebar** — opening a file shows its parent folder's tree. Toggle with `⌘\` (animated). Close it for a distraction-free view.
 - 🔖 **Smart tabs** — files in the **same folder** open as tabs; files from a **different folder** open in a new window. Jump with `⌘1`–`⌘9`, cycle with `⌘⌥←` / `⌘⌥→`.
@@ -93,15 +94,17 @@ It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads t
 | Action | How |
 |---|---|
 | Open a file | Double-click a `.md` in Finder (after install), or drag it onto the app |
-| Toggle View / Edit | `⌘E` (or the toolbar switch) |
+| Toggle Preview / WYSIWYG Edit | `⌘E` (or the toolbar switch) |
+| Switch WYSIWYG / Source | Use the editor-surface control in WYSIWYG Edit mode |
+| Toggle Typewriter mode | Use the viewfinder control in WYSIWYG Edit mode |
 | Toggle sidebar | `⌘\` |
 | Open file as tab | Click a Markdown file in the sidebar (same folder ⇒ tab) |
 | Next / previous tab | `⌘⌥→` / `⌘⌥←` |
 | Jump to tab _n_ | `⌘1` … `⌘9` |
-| Open line below / above in raw editor | `⌘↩` / `⇧⌘↩` |
-| Move / duplicate raw-editor lines | `⌥↑` `⌥↓` / `⌥⇧↑` `⌥⇧↓` |
-| Delete raw-editor line(s) | `⇧⌘K` |
-| Toggle HTML comments in raw editor | `⌘/` |
+| Open line below / above in Source editor | `⌘↩` / `⇧⌘↩` |
+| Move / duplicate Source-editor lines | `⌥↑` `⌥↓` / `⌥⇧↑` `⌥⇧↓` |
+| Delete Source-editor line(s) | `⇧⌘K` |
+| Toggle HTML comments in Source editor | `⌘/` |
 | Quick Look preview | Select a `.md` in Finder, press <kbd>space</kbd> |
 
 ### Make Glim the default Markdown app
@@ -110,7 +113,7 @@ It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads t
 
 ## How it works
 
-- **Editor window** — SwiftUI. *View* mode renders Markdown in a `WKWebView` (markdown-it → HTML, KaTeX for math, highlight.js for code). *Edit* mode is an `NSTextView` with soft-wrap and a small line-based linter.
+- **Editor window** — SwiftUI. *Preview* renders Markdown in a `WKWebView` (markdown-it → HTML, KaTeX for math, highlight.js for code). *WYSIWYG Edit* uses a native `NSTextView` presentation layer: the Markdown string remains canonical, but its delimiters are visually quiet and document elements receive native hierarchy. *Source* uses the exact source editor when syntax needs direct attention.
 - **Quick Look extension** — Finder's QL sandbox won't let a `WKWebView` spawn its WebContent process, so the extension renders Markdown to **fully static HTML in-process with JavaScriptCore** (KaTeX is pre-expanded to HTML + base64-inlined fonts) and returns it as a data-based `QLPreviewReply`. No JavaScript runs at display time.
 
   > The Quick Look extension was built by studying **[sbarex/QLMarkdown](https://github.com/sbarex/QLMarkdown)** — its working implementation is what revealed the two non-obvious requirements (`QLIsDataBasedPreview` in the extension `Info.plist`, and that a sandboxed `WKWebView` can't be used directly). Many thanks to that project. 🙏
@@ -119,8 +122,8 @@ It bumps `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml`, reads t
 
 ```
 App/                     SwiftUI app
-  Viewer/                WKWebView renderer (View mode)
-  Editor/                NSTextView + Markdown linter (Edit mode)
+  Viewer/                WKWebView renderer (Preview mode)
+  Editor/                WYSIWYG + Source NSTextView surfaces and linting
   Sidebar/               parent-folder file tree
   Resources/web/         vendored markdown-it · KaTeX · highlight.js · texmath
 QuickLook/               data-based Quick Look preview extension (JavaScriptCore)

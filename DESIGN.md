@@ -65,7 +65,13 @@ NSColor semantics. macOS resolves them per appearance and accent.
 ## 3. Typography
 
 System font everywhere (`-apple-system` / SF). Reading body is `16px / 1.65`.
-The raw editor is monospace (SF Mono) — the correct, native register for source.
+The inline editor uses a native proportional `16pt / 1.45` rhythm so Markdown can
+read like a document while it is being written. The Source editor remains monospace
+(SF Mono) — the correct, native register for exact source work.
+
+WYSIWYG Edit is the primary writing surface. Preview is the complete rendered pass
+for math, tables, highlighted code, print, and PDF export; Source is the explicit
+escape hatch for inspecting or repairing Markdown syntax.
 
 **Heading scale** — size + weight + tier carry the hierarchy; no borders.
 
@@ -89,7 +95,7 @@ Block gap is `1em`. Heading top is `1.5em`, heading bottom `0.5em`. Section
 rules (`hr`) get `2em`. The reading column is capped at **760px** and centered;
 full-width is an explicit, animated opt-in.
 
-**Secondary chrome bars** (find, lint, external-change, selection readout) share
+**Secondary chrome bars** (find, lint, selection readout) share
 one metric so they read as one family:
 
 - Material: `.bar`
@@ -106,10 +112,12 @@ one metric so they read as one family:
 - **Sidebar**: native `.sidebar` list. Folder name is the section header; the
   open file is **semibold**; Markdown files take the accent doc icon, other files
   a `.secondary` icon — icon tint *is* the file-type hierarchy.
-- **Toolbar**: trailing primary actions only (full-width toggle, view/edit
-  segmented control) — the document owns the rest of the window.
+- **Toolbar**: trailing primary actions only (full-width toggle, WYSIWYG/Source and
+  Preview/WYSIWYG segmented controls, and the typewriter toggle) — the document owns
+  the rest of the window.
 - **Bars stack** between toolbar and document, top to bottom, in descending
-  urgency: external-change → find → document → selection readout. Each is
+  urgency: find → document → selection readout. External file changes are adopted
+  silently by the editor. Each visible bar is
   hairline-separated and disappears when irrelevant.
 
 ---

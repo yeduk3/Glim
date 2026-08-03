@@ -18,7 +18,9 @@ struct ContentView: View {
         _browsingRoot = State(initialValue: inherited ?? fileURL?.deletingLastPathComponent())
     }
 
-    @State private var mode: EditorMode = .view
+    // WYSIWYG editing is the primary document surface. Preview remains available for
+    // print/export and a deliberate read-only pass, but opening a file should be writable.
+    @State private var mode: EditorMode = .edit
     @State private var browsingRoot: URL?
     @ObservedObject private var sidebarVis = SidebarVisibility.shared
     @StateObject private var find = FindController()
@@ -37,6 +39,8 @@ struct ContentView: View {
     @ObservedObject private var fontScale = FontScale.shared
     @ObservedObject private var fullWidth = FullWidthMode.shared
     @ObservedObject private var outlineVis = OutlineVisibility.shared
+    @AppStorage("glim.editorSurface") private var editorSurfaceRaw = EditorSurface.inline.rawValue
+    @AppStorage("glim.inlineTypewriter") private var inlineTypewriter = true
     @StateObject private var viewerHandle = ViewerHandle()
     @State private var hoveredLink = ""
     // Outline-panel jump (A2): a bumped token carries the target source line to the active mode.
@@ -53,6 +57,11 @@ struct ContentView: View {
                 }
             }
         )
+    }
+
+    private var editorSurface: EditorSurface {
+        get { EditorSurface(rawValue: editorSurfaceRaw) ?? .inline }
+        set { editorSurfaceRaw = newValue.rawValue }
     }
 
     var body: some View {
@@ -89,9 +98,8 @@ struct ContentView: View {
         .focusedSceneValue(\.printAction, mode == .view ? printDocument : nil)
         .focusedSceneValue(\.exportPDFAction, mode == .view ? exportPDF : nil)
         .background(WindowAccessor(rootKey: browsingRoot?.standardizedFileURL.path ?? "none"))
-        // Toggling to the rendered view focuses it so arrow keys scroll immediately.
-        // (The raw editor self-focuses on entry.) Only fires on an actual ⌘E toggle,
-        // not on a fresh tab/Space-preview where mode starts at .view.
+        // Toggling to the rendered preview focuses it so arrow keys scroll immediately.
+        // The WYSIWYG editor focuses itself on entry; this only fires on an actual ⌘E toggle.
         .onChange(of: mode) { _, m in
             selection.clear()   // stale count from the outgoing view shouldn't linger
             hoveredLink = ""    // the link-hover pill belongs to the rendered view only
@@ -262,10 +270,6 @@ struct ContentView: View {
 
     @ViewBuilder private var detail: some View {
         VStack(spacing: 0) {
-            if fileSync.conflict != nil {
-                ExternalChangeBar(onReload: { fileSync.reload() }, onKeep: { fileSync.keepMine() })
-                Divider()
-            }
             if find.isVisible {
                 FindBar(find: find, canReplace: mode == .edit)
                 Divider()
@@ -296,23 +300,46 @@ struct ContentView: View {
                     if !hoveredLink.isEmpty { LinkHoverPill(href: hoveredLink) }
                 }
         case .edit:
-            MarkdownSourceEditor(
-                text: $document.text,
-                config: EditorConfig(fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth),
-                find: find,
-                initialLine: sync.target(for: .edit),
-                focusPulse: detailFocus.pulse,
-                cursor: editCursor,
-                buffer: editBuffer,
-                imagePolicy: makeImagePolicy(),
-                jumpRequest: outlineJumpLine.map { (outlineJumpToken, $0) },
-                onEvent: { event in
-                    switch event {
-                    case .scrolled(let topLine): sync.report(line: topLine, from: .edit)
-                    case .selection(let count): selection.report(count)
+            if editorSurface == .inline {
+                InlineMarkdownEditor(
+                    text: $document.text,
+                    config: EditorConfig(fontScale: fontScale.scale,
+                                         fullWidth: fullWidth.isFullWidth),
+                    find: find,
+                    initialLine: sync.target(for: .edit),
+                    focusPulse: detailFocus.pulse,
+                    typewriterMode: inlineTypewriter,
+                    cursor: editCursor,
+                    buffer: editBuffer,
+                    imagePolicy: makeImagePolicy(),
+                    docDirectory: fileURL?.deletingLastPathComponent(),
+                    jumpRequest: outlineJumpLine.map { (outlineJumpToken, $0) },
+                    onEvent: { event in
+                        switch event {
+                        case .scrolled(let topLine): sync.report(line: topLine, from: .edit)
+                        case .selection(let count): selection.report(count)
+                        }
                     }
-                }
-            )
+                )
+            } else {
+                MarkdownSourceEditor(
+                    text: $document.text,
+                    config: EditorConfig(fontScale: fontScale.scale, fullWidth: fullWidth.isFullWidth),
+                    find: find,
+                    initialLine: sync.target(for: .edit),
+                    focusPulse: detailFocus.pulse,
+                    cursor: editCursor,
+                    buffer: editBuffer,
+                    imagePolicy: makeImagePolicy(),
+                    jumpRequest: outlineJumpLine.map { (outlineJumpToken, $0) },
+                    onEvent: { event in
+                        switch event {
+                        case .scrolled(let topLine): sync.report(line: topLine, from: .edit)
+                        case .selection(let count): selection.report(count)
+                        }
+                    }
+                )
+            }
         }
     }
 
@@ -330,13 +357,41 @@ struct ContentView: View {
             }
             .help("Toggle Full Width  (⇧⌘F)")
         }
+        if mode == .edit {
+            ToolbarItem(placement: .primaryAction) {
+                Picker("Editor", selection: $editorSurfaceRaw) {
+                    Label("WYSIWYG", systemImage: "text.alignleft")
+                        .accessibilityLabel("WYSIWYG")
+                        .tag(EditorSurface.inline.rawValue)
+                    Label("Source", systemImage: "doc.plaintext")
+                        .accessibilityLabel("Source")
+                        .tag(EditorSurface.source.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .help("WYSIWYG editor / source editor")
+            }
+            if editorSurface == .inline {
+                ToolbarItem(placement: .primaryAction) {
+                    Toggle(isOn: $inlineTypewriter) {
+                        Image(systemName: "viewfinder")
+                    }
+                    .accessibilityLabel("Typewriter")
+                    .accessibilityHint("Center the current paragraph while typing")
+                    .help("Center the current paragraph while typing")
+                }
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             Picker("Mode", selection: $mode) {
-                Image(systemName: "eye").tag(EditorMode.view)
-                Image(systemName: "pencil").tag(EditorMode.edit)
+                Label("Preview", systemImage: "eye")
+                    .accessibilityLabel("Preview")
+                    .tag(EditorMode.view)
+                Label("WYSIWYG", systemImage: "pencil")
+                    .accessibilityLabel("WYSIWYG Edit")
+                    .tag(EditorMode.edit)
             }
             .pickerStyle(.segmented)
-            .help("Toggle View / Edit  (⌘E)")
+            .help("Toggle Preview / WYSIWYG Edit  (⌘E)")
         }
         // Share the document file itself (D1). ShareLink renders as a native toolbar share
         // button; hidden for an untitled (no-URL) document.
@@ -382,26 +437,6 @@ struct ContentView: View {
                 try? data.write(to: url)
             }
         }
-    }
-}
-
-/// Banner shown when the open file changed on disk while the buffer also has unsaved edits.
-/// Reload adopts the disk version; Keep Mine ignores it (the next save overwrites disk).
-private struct ExternalChangeBar: View {
-    let onReload: () -> Void
-    let onKeep: () -> Void
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text("This file changed on disk.").font(.caption)
-            Spacer(minLength: 0)
-            Button("Reload", action: onReload)
-            Button("Keep Mine", action: onKeep)
-        }
-        .font(.caption)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.bar)
     }
 }
 

@@ -125,7 +125,7 @@ private struct FindCommands: View {
 }
 
 /// Format-menu markdown shortcuts. Each sends its selector down the responder chain; the
-/// raw editor's MarkdownTextView implements them, and in view mode nothing does — so the
+/// source/WYSIWYG editor's MarkdownTextView implements them, and in preview mode nothing does — so the
 /// items simply no-op. No FocusedValue gate is needed (harmless when unhandled).
 private struct FormatCommands: View {
     var body: some View {
@@ -153,7 +153,7 @@ private struct ModeCommands: View {
     @FocusedValue(\.focusSidebarAction) private var focusSidebar: (() -> Void)?
 
     var body: some View {
-        Button(mode == .edit ? "Switch to View" : "Switch to Edit") {
+        Button(mode == .edit ? "Switch to Preview" : "Switch to WYSIWYG Edit") {
             mode = (mode == .edit) ? .view : .edit
         }
         .keyboardShortcut("e", modifiers: .command)
@@ -201,7 +201,7 @@ private struct OutlineCommand: View {
     }
 }
 
-/// View-menu full-width toggle, synced across the rendered view and raw editor.
+/// View-menu full-width toggle, synced across the rendered preview and editing surfaces.
 /// Off (default) caps the content to a readable centered measure; on fills the width.
 private struct FullWidthCommand: View {
     @ObservedObject private var width = FullWidthMode.shared
@@ -213,7 +213,7 @@ private struct FullWidthCommand: View {
     }
 }
 
-/// View-menu font zoom, applied app-wide to both the rendered view and raw editor.
+/// View-menu font zoom, applied app-wide to preview and both editing surfaces.
 /// ⌘+ bigger, ⌘- smaller, ⌘0 reset. (⌘+ is produced by ⌘⇧=; the menu shows "⌘+".)
 private struct FontSizeCommands: View {
     @ObservedObject private var font = FontScale.shared

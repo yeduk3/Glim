@@ -85,15 +85,12 @@ final class OpenFocusRouter {
     private init() {}
 }
 
-/// Watches the open file's folder and reconciles external edits with the editor: adopts
-/// changes silently when the buffer has no unsaved divergence, and raises a reload/keep-mine
-/// prompt when both the file and the buffer changed (so an external edit can't clobber
-/// unsaved work, and our own autosave isn't mistaken for an external change).
+/// Watches the open file's folder and keeps the editor aligned with the file on disk.
+/// When an external edit is detected, the disk version is authoritative and replaces the
+/// current buffer immediately. This keeps the editor predictable for workflows where another
+/// app, sync service, or formatter owns the file.
 @MainActor
 final class FileSync: ObservableObject {
-    /// External disk content awaiting a reload/keep decision; nil = no conflict banner.
-    @Published var conflict: String?
-
     /// Read the live editor text. Set by ContentView.
     var currentText: () -> String = { "" }
     /// Replace the editor text with reloaded disk content. Set by ContentView.
@@ -101,14 +98,11 @@ final class FileSync: ObservableObject {
 
     private lazy var watcher = DirectoryWatcher { [weak self] in self?.recheck() }
     private var url: URL?
-    private var snapshot: String?      // content last in sync with disk
-    private var acknowledged: String?  // disk content the user chose to keep-mine over
 
     /// Begin watching `url`'s folder (no-op if already watching that file).
     func start(url: URL?) {
         guard let url, url != self.url else { return }
         self.url = url
-        snapshot = currentText()
         // ponytail: watches the whole parent dir (one extra FSEvents stream) and re-reads
         // one file per event — cheap for markdown; swap to a file-scoped watch if it bites.
         watcher.start(url: url.deletingLastPathComponent())
@@ -118,28 +112,12 @@ final class FileSync: ObservableObject {
         guard let url, let onDisk = try? String(contentsOf: url, encoding: .utf8) else { return }
         let text = currentText()
         if onDisk == text {                  // already matches (our own save / no real change)
-            snapshot = onDisk; acknowledged = nil
-            if conflict != nil { conflict = nil }
             return
         }
-        if onDisk == acknowledged { return } // user already chose to keep theirs over this
-        if text == snapshot {                // no local edits -> adopt the external change
-            snapshot = onDisk
-            applyReload(onDisk)
-        } else {                             // both diverged -> ask the user
-            conflict = onDisk
-        }
-    }
 
-    func reload() {
-        guard let c = conflict else { return }
-        snapshot = c; acknowledged = nil; conflict = nil
-        applyReload(c)
-    }
-
-    func keepMine() {
-        acknowledged = conflict
-        conflict = nil
+        // The disk version is authoritative. Replace local edits immediately rather than
+        // asking which version to keep; the next check then sees matching content and stops.
+        applyReload(onDisk)
     }
 }
 

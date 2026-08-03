@@ -109,6 +109,23 @@ rm -rf /Applications/Glim.app
 mv /tmp/glim-ship-extract/Glim.app /Applications/Glim.app
 rm -rf /tmp/glim-ship-extract
 "$LSREG" -f /Applications/Glim.app
+
+# Set Glim as the default app for Markdown. Registering the bundle only advertises
+# that Glim can open Markdown; it does not change an existing user's default handler.
+swift - <<'SWIFT' 2>/dev/null || true
+import AppKit
+import UniformTypeIdentifiers
+let sem = DispatchSemaphore(value: 0)
+if let md = UTType("net.daringfireball.markdown") {
+    Task {
+        try? await NSWorkspace.shared.setDefaultApplication(
+            at: URL(fileURLWithPath: "/Applications/Glim.app"), toOpen: md)
+        sem.signal()
+    }
+    sem.wait()
+}
+SWIFT
+
 spctl -a -vvv -t exec /Applications/Glim.app 2>&1 | sed -n '1,3p' || true
 
 # Activate the Quick Look extension WITHOUT a first manual launch. A plain lsregister
